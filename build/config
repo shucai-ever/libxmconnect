@@ -1,0 +1,2 @@
+LibCFlags=-DCONFIG_DRIVER_HI1131
+LibExt=_hi1131

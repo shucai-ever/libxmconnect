@@ -1,0 +1,15 @@
+
+#!help:	For HI1131_SUPPORT
+LibCFlags = -DCONFIG_DRIVER_HI1131
+LibExt = _hi1131
+WIFI_HI1131_config
+
+#!help:	For RTL8188_SUPPORT
+LibCFlags = -DCONFIG_DRIVER_RTL8188
+LibExt = _rtl8188
+WIFI_RTL8188_config
+
+#!help:	For HI1131_SUPPORT Single
+LibCFlags = -DCONFIG_DRIVER_HI1131 -D_PRE_WLAN_FEATURE_QUICK_START
+LibExt = _hi1131_Single
+WIFI_HI1131_Single_config

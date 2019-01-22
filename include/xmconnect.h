@@ -59,6 +59,12 @@ typedef enum
 	HW_ADDR,
 	
 }AddrType_e;
+
+typedef enum
+{
+	POWER_UP,
+	POWER_DOWN,
+}PowerState_e;
 	
 
 typedef enum 

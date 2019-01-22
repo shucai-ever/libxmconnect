@@ -1,16 +1,16 @@
-#include "headers.h"
-
 #include "driver_hisi_lib_api.h"
 #include "wpa_supplicant.h"
-#include "hostapd_if.h"
 
 #include "malloc.h"
 #include "string.h"
 #include "strings.h"
 
 #include "asm-generic/errno.h"
+#include "asm/io.h"
 
 
+
+#include"unistd.h"
 
 #include "stdlib.h"
 #include "stdio.h"
@@ -71,8 +71,7 @@ unsigned char g_index = 0; 							//已经创建的tcp链数（本项目只用一个tcp链）
 
 //外部库全局变量引用
 extern unsigned int g_ul_xm_wlan_resume_state;		//系统启动标志 								libdvr/net.c定义
-extern unsigned int g_chg_state;					//单片机回复供电状态    							hi_ext_hal_mcu.c定义
-extern unsigned int g_fource_sleepflag;				//十分钟强制关闭标志,该标志置1说明要主控睡眠				hi_ext_hal_mcu.c定义
+extern unsigned int g_force_sleep_flag;				//十分钟强制关闭标志,该标志置1说明要主控睡眠				hi_ext_hal_mcu.c定义
 extern unsigned int g_wpa_supplicant_had_connect;	//无线模块作为客户端，是否连接上热点并且获得ip				libdvr/net.c定义
 
 
@@ -95,7 +94,7 @@ void RebootSystem(void)
 
 
 
-int ConvertdBm2RSSI(int dBm)
+int XmConvertdBm2RSSI(int dBm)
 {
 	int level = 0;
 
@@ -135,7 +134,7 @@ int LevelSort(struct wpa_ap_info * wifiinfo, int num)
 	{
 		for (i=0; i<num; i++)
 		{
-			wifiinfo[i].rssi = (ConvertdBm2RSSI(wifiinfo[i].rssi/100))*100;
+			wifiinfo[i].rssi = (XmConvertdBm2RSSI(wifiinfo[i].rssi/100))*100;
 		}
 	}
 
@@ -434,7 +433,7 @@ int GetWifiLevel(char * ifname)
 
 	if (ipcLevel < 0)	//如果驱动里读出来是负的，需要转换为0~100
 	{	
-		ipcLevel = (ConvertdBm2RSSI(ipcLevel));		
+		ipcLevel = (XmConvertdBm2RSSI(ipcLevel));		
 	}
 
 	//如果通过中继设备连接NVR，而且中继距离NVR比较远，信号比较弱时，IPC的码率调整应该基于中继的信号强度，防止码率过大出现卡顿
@@ -1017,19 +1016,7 @@ int WirelessPairing(int pairing_type)
 	//如果连续搜索了6次都没有搜索到NVR或中继，设置主控睡眠，识别到快速连接的ssid后唤醒
 	if(search_times >= 6)
 	{
-		Read_Config_File(CONNNECTED_NVR_CONF, 1, ssid);
-		
-		if(ssid[0] != 0)
-		{
-			free(pwifi_result);
-			Write_Config_File(CONNNECTED_SLEEP_FLAG, g_IpcRuningData.WifiNvrInfo.ssid, g_wpa_supplicant_had_connect);
-			
-			printf("the wake ssid is:	%s\n", ssid);
-			hisi_wlan_set_wakeup_ssid(ssid);
-			usleep(1000*2000);
-			sync();
-			hisi_wlan_suspend();
-		}
+		XmSuspendByWlan("search NVR not find suspend");
 		
 	}
 		
@@ -1521,45 +1508,6 @@ int Switch2Bridge(void)
 }
 
 
-void CmdGoToSleep(char *recvBuf)
-{
-	unsigned char hwChange[32] = {0};
-	unsigned char hw[32] = {0};
-	unsigned char sleep_ssid[32] = {0};
-	unsigned char wlan_flag[2] = {0};
-	char auc_pattern[32] = {0}; //唤醒信号内容
-
-	
-	
-	XmGetEthAttr("wlan0", HW_ADDR, hw);
-	snprintf(hwChange, 13, "%02x%02x%02x%02x%02x%02x", hw[0], hw[1], hw[2], hw[3], hw[4], hw[5]); 
-	snprintf(auc_pattern, 22, "GOTOWAKE:%s", hwChange);
-
-	if((strlen(&recvBuf[10]) == strlen(hwChange)) && (memcmp(hwChange, &recvBuf[10], strlen(hwChange)) == 0))
-	{
-		Host_Sleep_Conf_Handle();
-	
-		//if(xm_keepalive_demo_set_switch(1,1) == 0)
-		{
-			
-		
-			unsigned int ul_netpattern_index = 0;
-			hisi_wlan_del_netpattern(ul_netpattern_index);
-			ul_netpattern_index = 1;
-			hisi_wlan_add_netpattern(ul_netpattern_index,	auc_pattern,	strlen(auc_pattern));
-			usleep(1000*1000);
-			//event = HISI_WOW_EVENT_TCP_UDP_KEEP_ALIVE | HISI_WOW_EVENT_NETPATTERN_UDP;
-			//hisi_wlan_set_wow_event(event);
-			
-			LOS_MuxDelete(g_variable_mux);
-			LOS_MuxDelete(g_variable_mux);
-			sync();
-			hisi_wlan_suspend();
-		}
-
-	}
-
-}
 
 
 
@@ -1898,7 +1846,7 @@ int WirelessHeartbeat(void)
 					break;
 				case GOTOSLEEP:
 					{
-						CmdGoToSleep(recvBuf);	
+						//CmdGoToSleep(recvBuf);	
 					}									
 					break;
 				case FORCE:
@@ -2016,6 +1964,10 @@ void xmconnect_init(void)
 {
 	unsigned int uwTickCount_wlan_start = 0;
 	int uwRet = 0;
+
+	//挂载SD卡，测试使用
+	mkdir("/mnt/sd0", 0777);
+	mount("/dev/mmcblk0p0", "/mnt/sd0", "vfat", 0, NULL);
 	
 
 	//获得wifi配网此时的tick数

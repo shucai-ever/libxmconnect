@@ -51,7 +51,9 @@
 #define FRAME_HEIGHT						576
 
 
-
+#define 	TCP_KEEPALIVE_FLAG					1
+#define 	UDP_KEEPALIVE_FLAG					1
+#define		LOGGER_FLAG							1
 
 
 
@@ -78,8 +80,7 @@ extern unsigned char g_index ; 							//已经创建的tcp链数（本项目只用一个tcp链）
 
 //外部库全局变量引用
 extern unsigned int g_ul_xm_wlan_resume_state;			//系统启动标志 								libdvr/net.c定义
-extern unsigned int g_chg_state;						//单片机回复供电状态    							hi_ext_hal_mcu.c定义
-extern unsigned int g_fource_sleepflag;					//十分钟强制关闭标志								hi_ext_hal_mcu.c定义
+extern unsigned int g_force_sleep_flag;					//十分钟强制关闭标志								hi_ext_hal_mcu.c定义
 
 extern unsigned int g_wpa_supplicant_had_connect;		//无线模块作为客户端，是否连接上热点并且获得ip				libdvr/net.c定义
 
@@ -90,7 +91,7 @@ extern struct completion  g_dhcp_complet;				//完成量变量：等待ip获取成功		app_i
 
 
 
-unsigned int g_uart_handle = 0;	//测试
+
 
 
 
@@ -228,6 +229,69 @@ int NumToDate(int set, char *out)
 
 }
 
+static void ReasonToString(int reason, char *out)
+{
+
+	switch(reason)
+	{
+		case REASON_TYPE_NULL:				
+			strcpy(out, "normal start");
+			break;
+		case REASON_TYPE_MAGIC_PACKET:			
+			strcpy(out, "magic packet");
+			break;
+		case REASON_TYPE_NETPATTERN_TCP:
+			
+			strcpy(out, "tcp netpattern");
+			break;
+		case REASON_TYPE_NETPATTERN_UDP:
+		
+			strcpy(out, "udp netpattern");
+			break;
+		case REASON_TYPE_DISASSOC_RX:
+			
+			strcpy(out, "receive disassociation");
+			break;
+		case REASON_TYPE_DISASSOC_TX:
+			
+			strcpy(out, "send disassociation");
+			break;
+		case REASON_TYPE_AUTH_RX:
+			strcpy(out, "receive authentication");
+			break;
+		case REASON_TYPE_TCP_UDP_KEEP_ALIVE:
+			strcpy(out, "keep alive timeout");
+			break;
+		case REASON_TYPE_HOST_WAKEUP:
+			strcpy(out, "host");
+			break;
+		case REASON_TYPE_OAM_LOG:
+			strcpy(out, "error wifi log");
+			break;
+		case REASON_TYPE_SSID_SCAN:
+			strcpy(out, "specially ssid find");
+			break;
+		case REASON_TYPE_MCU_KEY:
+			strcpy(out, "mcu key press");
+			break;
+		case REASON_TYPE_MCU_PIR:
+			strcpy(out, "mcu pir wake");
+			break;
+		case REASON_TYPE_MCU_RESET:
+			strcpy(out, "mcu reset press");
+			break;
+		case REASON_TYPE_MCU_RTC:
+			strcpy(out, "mcu rtc wake");
+			break;
+		default:
+			strcpy(out, "not know reason");
+			break;
+	}
+
+
+	return;
+}
+
 
 
 void xm_get_tick(const char * ch, int *tick)
@@ -237,7 +301,7 @@ void xm_get_tick(const char * ch, int *tick)
 	uwTickCount = LOS_TickCountGet();
 	if(0 != uwTickCount)
 	{
-		printf("\n*******************************\n[ %s ]:	LOS_TickCountGet = %d \n****************************\n", ch, (UINT32)uwTickCount);
+		printf("\033[32m[ %s ]:	LOS_TickCountGet = %d \033[0m\n", ch, (UINT32)uwTickCount);
 	}
 	*tick = uwTickCount;
 }
@@ -292,16 +356,16 @@ static void Host_WakeReason_McuGet(int *reason)
 {
 	
 	unsigned char buf[256] = {0};
-	Queue * wifiqueue = NULL;
+	Queue * nvrQueue = NULL;
 	
-	wifiqueue = GetWifiQueue();
-	if(De_Queue(wifiqueue, buf) == 0)
+	nvrQueue = GetNvrQueue();
+	if(De_Queue(nvrQueue, buf) == 0)
 	{
 		*reason = buf[2];
 	}
 	else
 	{
-		printf("wifiqueue have not info..\n");
+		printf("nvrQueue have not info..\n");
 	}
 
 	return;
@@ -328,9 +392,12 @@ void HostWake_Reason_Show(void)
 {
 	int wakup_reason= 0;
 	int count = 0;
+	char reason[30] = {0};
 
+	//从NVR Queue队列取唤醒原因
 	Host_WakeReason_McuGet(&wakup_reason);
-	usleep(1000*10);
+	
+	//从无线模块获取唤醒原因
 	hisi_wlan_get_wakeup_reason(&g_wakup_reason);
 	if(wakup_reason != 0)
 	{
@@ -339,69 +406,12 @@ void HostWake_Reason_Show(void)
 
 	
 	xm_get_tick("wake up reason", &count);
-
-	
-	switch(g_wakup_reason)
-	{
-		case REASON_TYPE_NULL:				
-			HostWake_Reason_ShowExport("normal start");
-			break;
-		case REASON_TYPE_MAGIC_PACKET:
-			
-			HostWake_Reason_ShowExport("magic packet");
-			break;
-		case REASON_TYPE_NETPATTERN_TCP:
-			
-			HostWake_Reason_ShowExport("tcp netpattern");
-			break;
-		case REASON_TYPE_NETPATTERN_UDP:
-		
-			HostWake_Reason_ShowExport("udp netpattern");
-			break;
-		case REASON_TYPE_DISASSOC_RX:
-			
-			HostWake_Reason_ShowExport("receive disassociation");
-			break;
-		case REASON_TYPE_DISASSOC_TX:
-			
-			HostWake_Reason_ShowExport("send disassociation");
-			break;
-		case REASON_TYPE_AUTH_RX:
-			HostWake_Reason_ShowExport("receive authentication");
-			break;
-		case REASON_TYPE_TCP_UDP_KEEP_ALIVE:
-			HostWake_Reason_ShowExport("keep alive timeout");
-			break;
-		case REASON_TYPE_HOST_WAKEUP:
-			HostWake_Reason_ShowExport("host");
-			break;
-		case REASON_TYPE_OAM_LOG:
-			HostWake_Reason_ShowExport("error wifi log");
-			break;
-		case REASON_TYPE_SSID_SCAN:
-			HostWake_Reason_ShowExport("specially ssid find");
-			break;
-		case REASON_TYPE_MCU_KEY:
-			HostWake_Reason_ShowExport("mcu key press");
-			break;
-		case REASON_TYPE_MCU_PIR:
-			HostWake_Reason_ShowExport("mcu pir wake");
-			break;
-		case REASON_TYPE_MCU_RESET:
-			HostWake_Reason_ShowExport("mcu reset press");
-			break;
-		case REASON_TYPE_MCU_RTC:
-			HostWake_Reason_ShowExport("mcu rtc wake");
-			break;
-		default:
-			HostWake_Reason_ShowExport("not know reason");
-			break;
-	}	
-	
+	ReasonToString(g_wakup_reason, reason);
+	HostWake_Reason_ShowExport(reason);	
 
 }
 
-int xm_bat_show(unsigned char * pCap, int state)
+int XmBatShow(unsigned char * pCap, int state)
 {
 	int ret = 0;
 
@@ -416,35 +426,101 @@ int xm_bat_show(unsigned char * pCap, int state)
 }
 
 
-
-
-
-
-#if 0
-int XmGetHwAttr(const char *ifname, AddrType_e type, char* out)
+int XmMcuInfoGet(char state)
 {
-	int socketfd;
-	struct ifreq struReq;
+	
 	
 
-	memset(&struReq, 0x00, sizeof(struct ifreq));
-	strncpy(struReq.ifr_name, ifname, sizeof(struReq.ifr_name));
-	
-	socketfd = socket(PF_INET, SOCK_STREAM, 0);
-	if (-1 == ioctl(socketfd, SIOCGIFHWADDR, &struReq))
-	{
-		printf("ioctl hwaddr error!\n");
-		return -1;
-	}
-
-	memcpy(out, struReq.ifr_hwaddr.sa_data, 8);
 	
 
 	return 0;
-
 }
 
-#endif
+static int XmTcpKeepaliveSet(bool state)
+{
+	WLAN_KEEPALIVE_CONFIG wlanparam;
+	memset(&wlanparam, 0, sizeof(wlanparam));
+	wlanparam.sockfd = g_sockfd[0];
+	wlanparam.ul_sess_id = 1;
+	wlanparam.ul_interval_timer = 10000;	//10s
+	wlanparam.ul_retry_interval_timer = 3000;	//3s重传周期
+	wlanparam.us_retry_max_count = 8;		//最大重传次数
+	strncpy(wlanparam.keepalive_buf, "sleep_demo", 9);
+	wlanparam.keepalive_buf_len = strlen(wlanparam.keepalive_buf);
+	WlanSetKeepAliveTcpParams(&wlanparam);
+	WlanKeepAliveSwitch(state, 1);
+
+	return 0;
+}
+
+static void XmNetPatternSet(int tcpflag, int udpflag)
+{
+	char hw[6] = {0};
+	char hwChange[13] = {0};
+	char auc_pattern[40] = {0};
+	
+				
+	hisi_wlan_del_netpattern(0);
+	hisi_wlan_del_netpattern(1);
+	hisi_wlan_del_netpattern(2);
+	hisi_wlan_del_netpattern(3);
+	if(udpflag)
+	{
+		XmGetEthAttr("wlan0", HW_ADDR, hw);
+		snprintf(hwChange, 13, "%02x%02x%02x%02x%02x%02x", hw[0], hw[1], hw[2], hw[3], hw[4], hw[5]); 
+		snprintf(auc_pattern, 22, "GOTOWAKE:%s", hwChange);
+		hisi_wlan_add_netpattern(0, auc_pattern, strlen(auc_pattern));
+	}
+
+	if(tcpflag)
+	{
+		hisi_wlan_add_netpattern(1, "GOTOWAKE", 8);
+	}
+		
+	return;
+}
+
+static int XmLogInfoWrite(bool state, const char *reason)
+{
+
+
+	return 0;
+}
+
+
+int XmSuspendByWlan(const char *reason)
+{
+	int tcpKeepFlag = TCP_KEEPALIVE_FLAG;
+	int udpKeepFlag = UDP_KEEPALIVE_FLAG;
+	int loggerFlag = LOGGER_FLAG;
+	
+	//睡眠前保存文件
+	Host_Sleep_Conf_Handle(g_wpa_supplicant_had_connect);
+
+	//主控上下电日志保存
+	if(loggerFlag)
+		XmLogInfoWrite(POWER_DOWN, reason);
+
+	//设置唤醒字符串
+	XmNetPatternSet(tcpKeepFlag, udpKeepFlag);
+
+	//使能tcp唤醒
+	if(tcpKeepFlag)
+		XmTcpKeepaliveSet(g_wpa_supplicant_had_connect);
+
+	//执行睡眠操作
+	sync();
+	hisi_wlan_suspend();
+
+	return 0;
+}
+
+
+
+
+
+
+
 
 int XmGetHwAttr(const char *ifname, AddrType_e type, unsigned char* out)
 {
@@ -1433,10 +1509,11 @@ void set_wake_flag(void)
 	return;
 }
 
-void Host_Sleep_Conf_Handle(void)
+void Host_Sleep_Conf_Handle(bool state)
 {
-	char sleep_ssid[32] = {0};
+	char sleep_ssid[33] = {0};
 	char wlan_flag[2] = {0};
+	char wake_ssid[33] = {0};
 	
 	if(access(CONNNECTED_SLEEP_FLAG, F_OK) != 0)
 	{
@@ -1456,6 +1533,13 @@ void Host_Sleep_Conf_Handle(void)
 			printf("Save the SLEEP_FLAG<%s>\n", g_IpcRuningData.WifiNvrInfo.ssid);
 			Write_Config_File(CONNNECTED_SLEEP_FLAG, g_IpcRuningData.WifiNvrInfo.ssid, g_wpa_supplicant_had_connect);
 		}
+	}
+
+	if(state == 0)
+	{
+		Read_Config_File(CONNNECTED_NVR_CONF, 1, wake_ssid);
+		printf("\033[33mSet Sleep SSID To Wake:[%s]", wake_ssid );
+		hisi_wlan_set_wakeup_ssid(wake_ssid);
 	}
 
 
@@ -1488,8 +1572,7 @@ void Host_Wake_RtcSet(int times)
 
 	SYSTEM_TIME SetTime;
 
-	//先保存睡眠配置文件
-	Host_Sleep_Conf_Handle();
+
 	
 	HI_HAL_MCUHOST_Rtc_Sync();
 	usleep(1000*100);
@@ -1520,10 +1603,7 @@ void Host_Wake_RtcSet(int times)
 
 	
 
-	LOS_MuxDelete(g_variable_mux);
-	LOS_MuxDelete(g_function_mux);
-	sync();
-	hisi_wlan_suspend();
+	XmSuspendByWlan("rtc time suspend");
 
 	
 	return;
@@ -1947,95 +2027,13 @@ void xm_uarthandle_demo_build(void)
 	SYSTEM_TIME datetime;
 
 
-/*	
-	usleep(1000*1000*10);
-	
-		mkdir("/mnt/sd0", 0777);
-		mount("/dev/mmcblk0p0", "/mnt/sd0", "vfat", 0, NULL);
-*/
-		//cmd_qr_test1();
-	
-		//cmd_qr_test();
-	
-	
-	//usleep(1000*1000*60);
 
-
-	
-	
 	while(1)
 	{
-		if(g_uart_handle)
-		{	
-			memset(datebuf, 0, sizeof(datebuf));
-			
-			wifiqueue = GetWifiQueue();
-			//xm_wifiqueue_addrshow(wifiqueue);
-			
-			num = wifiqueue->res;
-			printf("\n");
-			for(i = 0; i < num; i++)
-			{
-				ret = De_Queue(wifiqueue, buf);
-				datebuf[i] = buf[0];
-				memset(buf, 0, sizeof(buf));
-			}
-			printf("\n\n");			
-
-			//xm_wifiqueue_addrshow(wifiqueue);
-
-
-			printf("the datebuf is:	%02x %02x %02x %02x %02x %02x\n", datebuf[0], datebuf[1], datebuf[2], datebuf[3], datebuf[4], datebuf[5]);
-			
-			date[0] = (datebuf[0] << 24) | (datebuf[1] << 16) | (datebuf[2] << 8) | (datebuf[3] << 0);
-			date[1] = (datebuf[4] << 8) | (datebuf[5] << 0);
-			
-			
-			memset(&datetime, 0, sizeof(datetime));
-			datetime.year = date[1];
-			datetime.wday = (date[0] >> 26) & 0x3f;	
-			datetime.month = (date[0] >> 22) & 0xf;
-			datetime.day = (date[0] >> 17) & 0x1f;
-			datetime.hour = (date[0] >> 12 ) & 0x1f;
-			datetime.minute = (date[0] >> 6) & 0x3f;
-			datetime.second = (date[0] >> 0) & 0x3f;
-
-			memset(dst, 0, sizeof(dst));
-			NumToDate(datetime.wday, dst);
-
-			printf("time is:	[%d-%d-%d	%d:%d:%d	%s]\n", datetime.year,datetime.month, datetime.day, datetime.hour,
-														datetime.minute,datetime.second, dst);	
-			
-
-			g_uart_handle = 0;
-		}
-
-		if(g_fource_sleepflag)
+	
+		if(g_force_sleep_flag)
 		{
-			Host_Sleep_Conf_Handle();
-			g_fource_sleepflag = 0;
-		
-			char auc_pattern[32] = {0}; //唤醒信号内容
-			unsigned char hwChange[32] = {0};
-			unsigned int ul_netpattern_index = 0;				
-			unsigned char hw[32] = {0};
-			
-			XmGetEthAttr("wlan0", HW_ADDR, hw);
-			snprintf(hwChange, 13, "%02x%02x%02x%02x%02x%02x", hw[0], hw[1], hw[2], hw[3], hw[4], hw[5]); 
-			snprintf(auc_pattern, 22, "GOTOWAKE:%s", hwChange);		
-			
-			hisi_wlan_del_netpattern(ul_netpattern_index);
-			ul_netpattern_index = 1;
-			hisi_wlan_add_netpattern(ul_netpattern_index,auc_pattern,strlen(auc_pattern));
-			usleep(1000*1000);
-			//event = HISI_WOW_EVENT_TCP_UDP_KEEP_ALIVE | HISI_WOW_EVENT_NETPATTERN_UDP;
-			//hisi_wlan_set_wow_event(event);
-			
-			LOS_MuxDelete(g_variable_mux);
-			LOS_MuxDelete(g_variable_mux);
-			sync();
-			hisi_wlan_suspend();
-
+			XmSuspendByWlan("force suspend");
 		}
 
 	
@@ -2290,7 +2288,7 @@ int xm_sleep_demo_build(void)
 	char recvbuf[128] = {0};  
 	int addrLen = sizeof(struct sockaddr_in);  
 	unsigned int event = 0;
-	char auc_pattern[32] = {0};	
+	
 
 	while(1)
 	{
@@ -2303,39 +2301,15 @@ int xm_sleep_demo_build(void)
 			{				
 				unsigned char hwChange[32] = {0};
 				unsigned char hw[32] = {0};
-				unsigned char sleep_ssid[32] = {0};
+				
 				
 				XmGetEthAttr("wlan0", HW_ADDR, hw);
 				snprintf(hwChange, 13, "%02x%02x%02x%02x%02x%02x", hw[0], hw[1], hw[2], hw[3], hw[4], hw[5]); 
-				snprintf(auc_pattern, 22, "GOTOWAKE:%s", hwChange);
 			
 
 				if((strlen(&recvbuf[10]) == strlen(hwChange)) && (memcmp(hwChange, &recvbuf[10], strlen(hwChange)) == 0))
 				{
-					if(g_wpa_supplicant_had_connect)
-					{
-						Host_Sleep_Conf_Handle();						
-						
-					//	if(xm_keepalive_demo_set_switch(1,1) == 0)
-						{
-							unsigned int ul_netpattern_index = 0;
-							hisi_wlan_del_netpattern(ul_netpattern_index);
-							ul_netpattern_index = 1;
-							hisi_wlan_add_netpattern(ul_netpattern_index,	auc_pattern,	strlen(auc_pattern));
-							usleep(1000*1000);
-							
-							//hisi_wlan_set_wow_event(event);
-							//set_wake_flag();
-							usleep(1000*1000);
-						
-							LOS_MuxDelete(g_variable_mux);
-							LOS_MuxDelete(g_function_mux);
-							sync();
-							hisi_wlan_suspend();
-						}					
-					}
-
-
+					XmSuspendByWlan("udp cmd suspend");
 				}				
 				
 			}

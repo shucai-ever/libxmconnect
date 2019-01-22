@@ -37,6 +37,18 @@ typedef struct Queue
 
 typedef unsigned char  Type;
 
+typedef struct WLAN_KEEPALIVE_CONFIG
+{
+	int 				sockfd;					 /* TCP socket id*/
+	unsigned int        ul_sess_id;
+	unsigned int        ul_interval_timer;       /* 心跳包发送周期 */
+    unsigned int        ul_retry_interval_timer; /* 重传时心跳包发送周期 */
+    unsigned short      us_retry_max_count;      /* 最大重传次数 */
+	unsigned short		keepalive_buf_len;		 /* keepalive_buf 的长度*/
+	unsigned char       keepalive_buf[128];
+} WLAN_KEEPALIVE_CONFIG;
+
+
 
 
 /*@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@引用外部库函数@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@*/
@@ -152,7 +164,7 @@ extern int USART_Send_Data(int fd, unsigned char* sbuf);
 **param[out]	：无
 **返回值			：Queue * 结构体    
 **********************************************/	
-extern Queue* GetWifiQueue(void);
+extern Queue* GetNvrQueue(void);
 
 
 
@@ -171,8 +183,8 @@ extern int HiCap_CaptureYUVStop(int VpssGrp, int exChn);
 
 
 
-
-
+extern int WlanSetKeepAliveTcpParams(WLAN_KEEPALIVE_CONFIG *pParam);
+extern int WlanKeepAliveSwitch(unsigned char keepalive_switch, unsigned int keepalive_num);
 
 
 

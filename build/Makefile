@@ -1,7 +1,6 @@
-LITEOSTOPDIR = /home/zhaozuoen/file/liteos/Hi3518E_SDK_V5.0.5.3/osdrv/opensource/liteos/liteos/
-#LITEOSTOPDIR = /home/zhaozuoen/file/liteos/Hi1131C_V100R001C01B361/Software/Source/liteos
-include $(LITEOSTOPDIR)/config.mk
+SDK_VERSION := V5.0.5.3
 
+include /home/zhaozuoen/liteos/Branches/I_2016.3.07_IPC_V1.01.R01/MainApplication/LITEOS_HI3518EV200/Makefile.param
 
 ALLDIR = ../../
 TOPDIR = ..
@@ -48,7 +47,7 @@ $(LIB_TARGET): $(LIB_OBJS)
 	
 	$(RM) $@;
 	$(AR) $(AFLAGS) $@ $^
-	cp -rf $@ /home/zhaozuoen/file/liteos/Hi1131C_V100R001C01B361/Software/Source/wifi_project/out/hi3518ev200/lib
+	cp -rf $@ /home/zhaozuoen/liteos/Branches/I_2016.3.07_IPC_V1.01.R01/_libs/LITEOS_HI3518EV200/V5.0.5.3
 	cp -rf $@ /home/zhaozuoen/file/liteos/build/I_2016.3.07_IPC_V1.01.R01/_libs/LITEOS_HI3518EV200/V5.0.5.3
 .c.o:
 	$(CC)  $(LITEOS_CFLAGS) -c -o $@ $<

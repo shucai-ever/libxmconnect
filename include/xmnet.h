@@ -104,7 +104,16 @@ extern void HostWake_Reason_Show(void);
 **param[out]	：pCap	电量百分比值
 **返回值			：0 获取成功		-1 获取失败
 **********************************************/
-extern int xm_bat_show(unsigned char * pCap, int state);
+extern int XmBatShow(unsigned char * pCap, int state);
+
+
+/*********************************************
+**函数功能			：执行睡眠操作
+**param [in]	：reason 睡眠原因	
+**param[out]	：无
+**返回值			：0 执行成功	
+**********************************************/
+extern int XmSuspendByWlan(const char *reason);
 
 
 /*********************************************
@@ -275,7 +284,7 @@ extern void set_wake_flag(void);
 **param[out]	：无
 **返回值			：无
 **********************************************/
-extern void Host_Sleep_Conf_Handle(void);
+extern void Host_Sleep_Conf_Handle(bool state);
 	
 
 /*********************************************

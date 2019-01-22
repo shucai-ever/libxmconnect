@@ -56,8 +56,8 @@ extern unsigned char g_index ; 							//已经创建的tcp链数（本项目只用一个tcp链）
 
 //外部库全局变量引用
 extern unsigned int g_ul_xm_wlan_resume_state;			//系统启动标志 								libdvr/net.c定义
-extern unsigned int g_chg_state;						//单片机回复供电状态    							hi_ext_hal_mcu.c定义
-extern unsigned int g_fource_sleepflag;					//十分钟强制关闭标志								hi_ext_hal_mcu.c定义
+
+extern unsigned int g_force_sleep_flag;					//十分钟强制关闭标志								hi_ext_hal_mcu.c定义
 
 extern unsigned int g_wpa_supplicant_had_connect;		//无线模块作为客户端，是否连接上热点并且获得ip				libdvr/net.c定义
 
@@ -70,7 +70,7 @@ struct     hostapd_conf     g_hapd_conf ;
 
 
 
-extern unsigned int g_uart_handle;		//测试
+
 
 
 
@@ -861,42 +861,9 @@ void cmd_sleep(void)
 	char sleep_ssid[32] = {0};
 	char wlan_flag[2] = {0};
 	
-	if(g_wpa_supplicant_had_run == 0)
-	{
-		
-	    uwRet = wpa_supplicant_start("wlan0", "hisi", NULL);
+	wap_start_xm();
 
-	    if (uwRet != 0)
-	    {
-	        printf("cmd_wpa_start fail.\n");
-	        
-	    }
-		else
-		{
-			printf("cmd_wpa_start success\n");
-			Mux_Operate(&g_wpa_supplicant_had_run, 1);
-		}
-		
-		hisi_wlan_enable_channel_14();
-	}
-
-	
-	Read_Config_File(CONNNECTED_SLEEP_FLAG, 1, sleep_ssid);
-	Read_Config_File(CONNNECTED_SLEEP_FLAG, 2, wlan_flag);
-
-	printf("\033[33mthe sleep_ssid is %s.  wlan_flag is %d\033[0m\n", sleep_ssid, atoi(wlan_flag));
-	
-	if((memcmp(sleep_ssid, g_IpcRuningData.WifiNvrInfo.ssid, strlen(sleep_ssid)) != 0) ||(atoi(wlan_flag) != g_wpa_supplicant_had_connect))
-	{
-		printf("Save the SLEEP_FLAG<%s>\n", g_IpcRuningData.WifiNvrInfo.ssid);
-		Write_Config_File(CONNNECTED_SLEEP_FLAG, g_IpcRuningData.WifiNvrInfo.ssid, g_wpa_supplicant_had_connect);
-	}
-
-	LOS_MuxDelete(g_variable_mux);
-	LOS_MuxDelete(g_function_mux);
-	sync();
-	hisi_wlan_suspend();
-						
+	XmSuspendByWlan("cmd_sleep suspend");
 	
 	return;
 }
@@ -1122,7 +1089,7 @@ int cmd_bat_show(void)
 	
 	HI_HAL_MCUHOST_Power_Poll();
 
-	chgstate = g_chg_state;
+	//chgstate = g_chg_state;
 	if(chgstate >= 2)
 	{
 		chgstate = 2;
@@ -1131,7 +1098,7 @@ int cmd_bat_show(void)
 
 	
 
-	ret = xm_bat_show(&chgvalue, chgstate);
+	ret = XmBatShow(&chgvalue, chgstate);
 	if(ret != 0)
 	{
 		printf("get chg value error\n");
@@ -1249,22 +1216,7 @@ void cmd_search_wifi(void)
 	if(times >= 1)
 	{
 		free(pwifi_result);
-		
-		//Read_Config_File(CONNNECTED_NVR_CONF, 1, ssid);
-		strcpy(ssid, "WIFINVR00ac78540001");
-		
-		if(ssid[0] != 0)
-		{
-			//Write_Config_File(CONNNECTED_SLEEP_FLAG, g_IpcRuningData.WifiNvrInfo.ssid, g_wpa_supplicant_had_connect);
-
-		
-			printf("begin to set wake ssid:	[%s]\n", ssid);
-			
-			hisi_wlan_set_wakeup_ssid(ssid);			
-			usleep(1000*1000);
-			//sync();
-			hisi_wlan_suspend();
-		}
+		XmSuspendByWlan("cmd_wifiscan suspend");
 	}
 
 	free(pwifi_result);
@@ -1312,7 +1264,7 @@ void cmd_mcu_time(void)
 	HI_HAL_MCUHOST_Systemtime_Get();
 	usleep(1000*1000);
 
-	g_uart_handle = 1;
+
 	
 	
 	return;
@@ -1425,19 +1377,6 @@ void cmd_qr_test1(void)
 
 }
 
-static int cmd_ssid_wake(void)
-{
-	char ssid[33] = "XmBarcodeSign";
-	printf("begin to set wake ssid:	[%s]\n", ssid);
-
-	hisi_wlan_set_wakeup_ssid(ssid);			
-	usleep(1000*1000);
-	//sync();
-	hisi_wlan_suspend();
-
-
-	return 0;
-}
 
 
 
@@ -1464,9 +1403,9 @@ void WifiCmdReg(void)
 	osCmdReg(CMD_TYPE_EX, "mcu_time",  			0, 	(CMD_CBK_FUNC)cmd_mcu_time);
 	osCmdReg(CMD_TYPE_EX, "wpa_start",  		0, 	(CMD_CBK_FUNC)cmd_wpa_start);
 	osCmdReg(CMD_TYPE_EX, "country_set",  		0, 	(CMD_CBK_FUNC)cmd_country_set);
-	osCmdReg(CMD_TYPE_EX, "qr_test",  			0, 	(CMD_CBK_FUNC)cmd_qr_test);
-	osCmdReg(CMD_TYPE_EX, "qr_test1",  			0, 	(CMD_CBK_FUNC)cmd_qr_test1);
-	osCmdReg(CMD_TYPE_EX, "ssidwake",  			0, 	(CMD_CBK_FUNC)cmd_ssid_wake);
+	//osCmdReg(CMD_TYPE_EX, "qr_test",  			0, 	(CMD_CBK_FUNC)cmd_qr_test);
+	//osCmdReg(CMD_TYPE_EX, "qr_test1",  			0, 	(CMD_CBK_FUNC)cmd_qr_test1);
+	
 	
 }
 

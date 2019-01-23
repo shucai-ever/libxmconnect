@@ -39,7 +39,7 @@ LIB_OBJS =	$(SRCDIR)/xmconnect.o	$(SRCDIR)/xmnet.o $(SRCDIR)/xmcmd.o
 	
 TARGET	= $(LIB_TARGET)
 
-all: clean $(TARGET)
+all: $(TARGET)
 	
 
 $(LIB_TARGET): $(LIB_OBJS)
@@ -48,7 +48,6 @@ $(LIB_TARGET): $(LIB_OBJS)
 	$(RM) $@;
 	$(AR) $(AFLAGS) $@ $^
 	cp -rf $@ /home/zhaozuoen/liteos/Branches/I_2016.3.07_IPC_V1.01.R01/_libs/LITEOS_HI3518EV200/V5.0.5.3
-	cp -rf $@ /home/zhaozuoen/file/liteos/build/I_2016.3.07_IPC_V1.01.R01/_libs/LITEOS_HI3518EV200/V5.0.5.3
 .c.o:
 	$(CC)  $(LITEOS_CFLAGS) -c -o $@ $<
 

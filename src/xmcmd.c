@@ -16,19 +16,19 @@
 #include "linux/completion.h"
 
 
-
-#include "xmconnect.h"
 #include "xmextlib.h"
-
+#include "xmconnect.h"
 #include "xmnet.h"
 
 
 
 
 
-#define NVR_IP_ADDR 						"172.25.123.1"
+#define NVR_IP_ADDR 						"172.25.123.92"
 #define CONNNECTED_NVR_CONF 				"/jffs1/mnt/mtd/Config/last.conf"
 #define CONNNECTED_SLEEP_FLAG 				"/jffs1/mnt/mtd/Config/sleep.conf"
+#define LOGGER_CONF							"/jffs1/mnt/mtd/Config/logger.conf"
+
 #define IPC_INFO_ENABLE_FLAG 				"/jffs1/mnt/mtd/Config/heartbeat_info"
 #define NVR_WIFI_SSID_PREFIX 				"WIFINVR"
 #define BRG_WIFI_SSID_PREFIX				"WIFIBRG"
@@ -1377,7 +1377,51 @@ void cmd_qr_test1(void)
 
 }
 
+static int cmd_mcu_info(void)
+{
+	McuInfo_s mcuInfo;
+	XmMcuInfoGet(0xf, &mcuInfo);
 
+	return 0;
+}
+
+static int cmd_log_info(int argc, char *argv[])
+{
+	char buf[1024*10] = {0};
+	if(argc != 1)
+		printf("invalid parameber\nxm_log_info [read/write/del]\n");
+
+	if(strncmp(argv[0], "read", 4) == 0)
+	{
+		memset(buf, 0, sizeof(buf));
+		FileSimpleRead(LOGGER_CONF, buf, sizeof(buf));
+		printf("%s", buf);
+	}
+	else if(strncmp(argv[0], "write", 5) == 0)
+	{
+		XmLogInfoWrite(POWER_UP, "test");
+	}
+	else if(strncmp(argv[0], "del", 3) == 0)
+	{
+		remove(LOGGER_CONF);
+	}
+
+	return 0;
+}
+
+static void cmd_file(int argc, char *argv[])
+{
+	if(argc != 1)
+		printf("invalid parameber\nxm_file del\n");
+
+	if(strncmp(argv[0], "del", 3) == 0)
+	{
+		remove(CONNNECTED_NVR_CONF);
+		remove(CONNNECTED_SLEEP_FLAG);
+		remove(IPC_INFO_ENABLE_FLAG);
+	}
+	return;
+}
 
 
 void WifiCmdReg(void)
@@ -1393,7 +1437,7 @@ void WifiCmdReg(void)
 	osCmdReg(CMD_TYPE_EX, "rssi_zero",  		0, 	(CMD_CBK_FUNC)wpa_disconnect_xm);	
 	osCmdReg(CMD_TYPE_EX, "led_test",  			0, 	(CMD_CBK_FUNC)cmd_led_test);
 	osCmdReg(CMD_TYPE_EX, "pir_test",  			0, 	(CMD_CBK_FUNC)cmd_pir_test);
-	osCmdReg(CMD_TYPE_EX, "sleep",  			0, 	(CMD_CBK_FUNC)cmd_sleep);
+	osCmdReg(CMD_TYPE_EX, "xm_sleep",  			0, 	(CMD_CBK_FUNC)cmd_sleep);
 	osCmdReg(CMD_TYPE_EX, "arp_send",  			0, 	(CMD_CBK_FUNC)cmd_arp);
 	osCmdReg(CMD_TYPE_EX, "sed",  				0, 	(CMD_CBK_FUNC)cmd_sed);
 	osCmdReg(CMD_TYPE_EX, "bat_show",  			0, 	(CMD_CBK_FUNC)cmd_bat_show);
@@ -1405,7 +1449,9 @@ void WifiCmdReg(void)
 	osCmdReg(CMD_TYPE_EX, "country_set",  		0, 	(CMD_CBK_FUNC)cmd_country_set);
 	//osCmdReg(CMD_TYPE_EX, "qr_test",  			0, 	(CMD_CBK_FUNC)cmd_qr_test);
 	//osCmdReg(CMD_TYPE_EX, "qr_test1",  			0, 	(CMD_CBK_FUNC)cmd_qr_test1);
-	
+	osCmdReg(CMD_TYPE_EX, "xm_mcu_info",  		0, 	(CMD_CBK_FUNC)cmd_mcu_info);
+	osCmdReg(CMD_TYPE_EX, "xm_log",  		0, 	(CMD_CBK_FUNC)cmd_log_info);
+	osCmdReg(CMD_TYPE_EX, "xm_file",  		0, 	(CMD_CBK_FUNC)cmd_file);
 	
 }
 

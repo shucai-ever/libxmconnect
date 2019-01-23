@@ -72,13 +72,14 @@ typedef enum
 	GOTOBRG= 1,
 	BRGSIG = 2,
 	IPC_ACK = 3,
-	REBOOT = 4,
-	GOTOSLEEP = 5,
-	FORCE = 6,
-	AUTOSWITCH = 7,
-	IPconflict = 8,
-	PIR_SET = 9,
-	POWER_OFF_SET = 10,
+	REBOOT = 4,	
+	FORCE = 5,
+	AUTOSWITCH = 6,
+	IPconflict = 7,
+	GOTOSLEEP = 8,
+	GOTOWAKE = 9,
+	PIR_SET = 10,
+	RTC_SET = 11,
 	
 	Invalid,
 	
@@ -173,6 +174,7 @@ struct arpMsg
 typedef struct IpcRuningDate
 {
 	char 		LanMac[12 + 1];
+	char 		pirInfo[60];
 	int 		connected;
 	int 		DeamonSocketFd;
 	struct wpa_ap_info	WifiNvrInfo;
@@ -201,6 +203,45 @@ typedef struct StringToNum
     StringType_e num;
 } StringToNum_s;
 
+typedef struct PirInfo
+{
+	bool enCheck;
+	bool enSwitch;
+	int checkTime;
+	char enPirTime[2];
+	SYSTEM_TIME pirTime[4];
+}PirInfo_s;
+
+typedef struct ForceTimeInfo
+{
+	bool enForce;
+	int setTime;
+	int waitTime;
+	int curTime;
+}ForceTimeInfo_s;
+
+typedef struct McuInfo
+{
+	char powerInfo;
+	SYSTEM_TIME timeInfo;
+	PirInfo_s pirInfo;
+	ForceTimeInfo_s forceInfo;
+}McuInfo_s;
+
+typedef struct FileParam
+{
+	char ssid[33];
+	char wlanFlag;
+	char authType;
+	char pirInfo[60];
+}FileParam_s;
+
+typedef struct PirSetInfo
+{
+	bool enSwitch;
+	unsigned short delayTime;
+	unsigned char checkTime;
+}PirSetInfo_s;
 
 
 

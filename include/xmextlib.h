@@ -49,6 +49,21 @@ typedef struct WLAN_KEEPALIVE_CONFIG
 } WLAN_KEEPALIVE_CONFIG;
 
 
+#define MAX_PIR_LIST_NUM 2
+
+/*weekDayEn->bit0:以下触发时间段是否有效,bit1-7分别表示周一到周日是否有效，
+		若bit1-bit7全为0,且bit0为1,就只触发一次*/
+typedef struct PirDNDMode
+{
+	unsigned char weekDayEn;
+	SYSTEM_TIME *pStartTime;//开始时间
+	SYSTEM_TIME *pEndTime;//结束时间
+} PirDNDMode_s;
+
+typedef struct PirDNDModeList
+{
+	PirDNDMode_s pirMode[MAX_PIR_LIST_NUM];//pir触发时间段列表
+} PirDNDModeList_s;
 
 
 /*@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@引用外部库函数@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@*/
@@ -185,6 +200,7 @@ extern int HiCap_CaptureYUVStop(int VpssGrp, int exChn);
 
 extern int WlanSetKeepAliveTcpParams(WLAN_KEEPALIVE_CONFIG *pParam);
 extern int WlanKeepAliveSwitch(unsigned char keepalive_switch, unsigned int keepalive_num);
+extern void HI_HAL_MCUHOST_Pir_DNDMode_Config(PirDNDModeList_s *pirDNDList);
 
 
 

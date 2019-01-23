@@ -34,6 +34,15 @@ extern int Xm_KeepAlive_Set(void);
 extern int HI_HAL_MCUHOST_Systemtime_Get(void);
 
 
+/*********************************************
+**函数功能			：获取单片机系统信息
+**param [in]	：无
+**param[out]	：无
+**返回值			：0 发送成功
+**********************************************/
+extern int HI_HAL_MCUHOST_McuInfo_Get(char state);
+
+
 
 /*********************************************
 **函数功能			：心跳包中将接受到的数据包命令转换为数字，便于switch case
@@ -116,6 +125,9 @@ extern int XmBatShow(unsigned char * pCap, int state);
 extern int XmSuspendByWlan(const char *reason);
 
 
+
+
+
 /*********************************************
 **函数功能			：获取mac地址
 **param [in]	：ifname wlan0		type 无效		
@@ -149,7 +161,7 @@ extern int XmSetEthAttr(const char *ifname, AddrType_e type, const char *str);
 **param[out]	：无
 **返回值			：0 设置成功		-1 设置失败
 **********************************************/
-extern int XmSetStaticIp(void);
+extern int XmSetStaticIp(int type);
 
 
 /*********************************************
@@ -175,7 +187,7 @@ extern int FileSimpleWrite(const char * path,const char *buf,int count);
 **param[out]	：out 读取得到的内容
 **返回值			：0 读取成功		-1 读取失败
 **********************************************/
-extern int Read_Config_File(const char *path, int num, char *out);
+extern int Read_Config_File(const char *path, FileParam_s *rFileParam);
 
 
 /*********************************************
@@ -184,7 +196,16 @@ extern int Read_Config_File(const char *path, int num, char *out);
 **param[out]	：无
 **返回值			：0 写成功		-1 写失败
 **********************************************/
-extern int Write_Config_File(const char *path, const char *pssid, int auth_type);
+extern int Write_Config_File(const char *path, FileParam_s fileParam);
+
+
+/*********************************************
+**函数功能			：保存启动日志
+**param [in]	：state:开关机 reason:原因		
+**param[out]	：无
+**返回值			：0 写成功		-1 写失败
+**********************************************/
+extern int XmLogInfoWrite(bool state, const char *reason);
 
 
 /*********************************************
@@ -288,12 +309,12 @@ extern void Host_Sleep_Conf_Handle(bool state);
 	
 
 /*********************************************
-**函数功能			：使能pir唤醒，设置唤醒时间
-**param [in]	：periodtime 设置后抑制期		checktime 设置唤醒时间		
+**函数功能			：pir相关设置
+**param [in]	：无
 **param[out]	：无
-**返回值			：无
+**返回值			：0 执行成功	
 **********************************************/
-extern void Host_Wake_PirSet(bool pirswitch, unsigned char checktime);
+extern int Host_Wake_PirSet(void);
 
 
 /*********************************************

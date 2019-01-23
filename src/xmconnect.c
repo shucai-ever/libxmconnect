@@ -19,10 +19,8 @@
 #include "shell.h"
 #include "linux/completion.h"
 
-
-#include "xmconnect.h"
 #include "xmextlib.h"
-
+#include "xmconnect.h"
 #include "xmnet.h"
 #include "xmcmd.h"
 
@@ -30,7 +28,7 @@
 #define		NVR_WIFI_SSID_PREFIX 		"WIFINVR"
 #define		BRG_WIFI_SSID_PREFIX		"WIFIBRG"
 #define	 	NVR_WIFI_PASSWD				"XMNVR123456"
-#define 	NVR_IP_ADDR					"172.25.123.1"
+#define 	NVR_IP_ADDR					"172.25.123.92"
 #define 	PORT 						9988
 
 //#define NVR_IP_ADDR "192.168.10.1"
@@ -64,6 +62,8 @@ unsigned int g_wpa_supplicant_had_sock = 0;			//0：没有成功连接sock		1：已经连接
 int g_sockfd[4] = {0}; 								//记录tcp连接的socket描述符
 unsigned char g_keepalive_switch = 0;               //保活开关
 unsigned char g_index = 0; 							//已经创建的tcp链数（本项目只用一个tcp链）
+
+int g_heartime = 0;									//socket交互成功用时
 
 
 
@@ -616,16 +616,16 @@ __RET:
 	{
 		Mux_Operate_Lock();
 		g_wpa_supplicant_had_sock = 1;
-		//g_index = 1;
-		//g_sockfd[0] = sockfd;
+		g_index = 1;
+		g_sockfd[0] = sockfd;
 		Mux_Operate_Unlock();
 	}
 	else
 	{
 		Mux_Operate_Lock();
 		g_wpa_supplicant_had_sock = 0;
-		//g_index = 0;
-		//g_sockfd[0] = sockfd;
+		g_index = 0;
+		g_sockfd[0] = sockfd;
 		Mux_Operate_Unlock();
 	}
 	g_IpcRuningData.DeamonSocketFd = sockfd;
@@ -883,11 +883,14 @@ static int TryConnect(struct wpa_ap_info pwifi_scan, int hidden, int force)
 		
 		memcpy(&g_IpcRuningData.WifiNvrInfo, &pwifi_scan, sizeof(g_IpcRuningData.WifiNvrInfo));
 		if ((force == WIRELESS_PAIRING) && (memcmp(pwifi_scan.ssid, "WIFINVR", 7) == 0))		//Bridge 不需要保存标志
-		{
-			
-			printf("Save the last.conf.\n");
-			Write_Config_File(CONNNECTED_NVR_CONF, pwifi_scan.ssid, pwifi_scan.auth);
-			sync();			
+		{			
+			printf("\033[32mSave the last.conf.\033[0m\n");
+			FileParam_s wFileParam;
+			memset(&wFileParam, 0, sizeof(wFileParam));
+			strncpy(wFileParam.ssid, pwifi_scan.ssid, strlen(pwifi_scan.ssid));
+			wFileParam.authType = pwifi_scan.auth;
+			Write_Config_File(CONNNECTED_NVR_CONF, wFileParam);
+						
 		}
 
 		
@@ -924,12 +927,14 @@ int WirelessPairing(int pairing_type)
 	int i, j;
 	int lastWifiinfoIndex[10];
 	int lastWifiCount = 0;
+	
 	char *WifiPrefix[2] = {NVR_WIFI_SSID_PREFIX, BRG_WIFI_SSID_PREFIX};
-	char ssid[33] = {0};
-	char auth_type[2] ={0};
+	
 	unsigned int search_times = 0;
 	unsigned int event = 0;
 	unsigned char sleep_flag[2] = {0};
+
+	FileParam_s rFileParam;
 
 	
 	
@@ -938,8 +943,8 @@ int WirelessPairing(int pairing_type)
 
 	if(access(CONNNECTED_SLEEP_FLAG, F_OK) == 0)
 	{		
-		Read_Config_File(CONNNECTED_SLEEP_FLAG, 2, sleep_flag);
-		g_before_sleep_wlan_flag = atoi(sleep_flag);
+		Read_Config_File(CONNNECTED_SLEEP_FLAG, &rFileParam);
+		g_before_sleep_wlan_flag = rFileParam.wlanFlag;
 		printf("the g_before_sleep_wlan_flag is %d.\n", g_before_sleep_wlan_flag);
 	}
 
@@ -948,12 +953,13 @@ int WirelessPairing(int pairing_type)
 	//先检验是重新上电开机还是待机唤醒状态，待机唤醒跳过配网过程
 	//仅当唤醒的原因为tcp或udp唤醒时，直接跳过连饺鹊阌的过程，进行后面的socket连接通信
 	if((g_ul_xm_wlan_resume_state == 1) && (g_before_sleep_wlan_flag == 1) && 
-		((g_wakup_reason == 3) ||(g_wakup_reason == 11) ||(g_wakup_reason == 12) ||(g_wakup_reason == 19)))
+		((g_wakup_reason == 3) ||(g_wakup_reason == 2) ||(g_wakup_reason == 11) ||(g_wakup_reason == 12) ||(g_wakup_reason == 18)))
 	{
 		printf("\n*****************had connected .go to heartbeat******************\n");
 		g_wakup_reason = 20;
 		memset(g_IpcRuningData.WifiNvrInfo.ssid, 0, 33);
-		Read_Config_File(CONNNECTED_SLEEP_FLAG, 1, g_IpcRuningData.WifiNvrInfo.ssid);
+		Read_Config_File(CONNNECTED_SLEEP_FLAG, &rFileParam);
+		strncpy(g_IpcRuningData.WifiNvrInfo.ssid, rFileParam.ssid, strlen(rFileParam.ssid));
 		
 		g_wpa_supplicant_had_connect = 1;
 		
@@ -970,24 +976,24 @@ int WirelessPairing(int pairing_type)
 	{
 		struct wpa_ap_info last_result ;
 		
-		if((!Read_Config_File(CONNNECTED_NVR_CONF, 1, ssid)) && (!Read_Config_File(CONNNECTED_NVR_CONF, 2, auth_type)) )
-		{
-
-			if(ssid[0] != 0)
+		Read_Config_File(CONNNECTED_NVR_CONF, &rFileParam);
+		
+		
+		if(strlen(rFileParam.ssid) != 0)
+		{			
+			memset(&last_result, 0, sizeof(struct wpa_ap_info));
+			memcpy(last_result.ssid, rFileParam.ssid, strlen(rFileParam.ssid));
+			last_result.auth = rFileParam.authType;
+			
+			
+			int timescount = 0;
+			xm_get_tick("fast connect", &timescount);
+			
+			if (TryConnect(last_result, 0, FAST_PAIRING))
 			{
-				memset(&last_result, 0, sizeof(struct wpa_ap_info));
-				memcpy(last_result.ssid, ssid, 33);
-				last_result.auth = atoi(auth_type);
-				
-				
-				int timescount = 0;
-				xm_get_tick("fast connect", &timescount);
-				
-				if (TryConnect(last_result, 0, FAST_PAIRING))
-				{
-					return 1;
-				}
+				return 1;
 			}
+			
 		}
 	}
 	
@@ -1049,9 +1055,9 @@ int WirelessPairing(int pairing_type)
 
 	if ( (!access(CONNNECTED_NVR_CONF, F_OK) ) && (-1==connected))
 	{
-		char buf[128] = {0};
+		
 
-		if(Read_Config_File(CONNNECTED_NVR_CONF, 1, buf) != 0)
+		if(Read_Config_File(CONNNECTED_NVR_CONF,&rFileParam) != 0)
 		{
 			printf("read file <%s> error.\n", CONNNECTED_NVR_CONF);
 
@@ -1059,8 +1065,8 @@ int WirelessPairing(int pairing_type)
 
 		for (i=0; i<num; i++)
 		{
-			if (strlen(buf) == strlen(pwifi_result[i].ssid)
-				&& !memcmp(buf, pwifi_result[i].ssid, strlen(buf)))
+			if (strlen(rFileParam.ssid) == strlen(pwifi_result[i].ssid)
+				&& !memcmp(rFileParam.ssid, pwifi_result[i].ssid, strlen(rFileParam.ssid)))
 			{
 				last = i;
 				break;
@@ -1073,10 +1079,10 @@ int WirelessPairing(int pairing_type)
 
 		for (i=0; i<num; i++)
 		{
-			if 	(((strlen(buf) == strlen(pwifi_result[i].ssid)
-					&& !memcmp(buf, pwifi_result[i].ssid, strlen(buf))))
+			if 	(((strlen(rFileParam.ssid) == strlen(pwifi_result[i].ssid)
+					&& !memcmp(rFileParam.ssid, pwifi_result[i].ssid, strlen(rFileParam.ssid))))
 				||((memcmp(pwifi_result[i].ssid, BRG_WIFI_SSID_PREFIX, 7) == 0)
-					&& (memcmp(&buf[7], &pwifi_result[i].ssid[7], 12) == 0)))
+					&& (memcmp(&rFileParam.ssid[7], &pwifi_result[i].ssid[7], 12) == 0)))
 			{
 				lastWifiinfoIndex[lastWifiCount++] = i;
 				printf("The last related ap:%s\n", pwifi_result[i].ssid);
@@ -1308,6 +1314,8 @@ int ForceConnect(char *pSsid)
 {
 	int num = 0;
 	struct wpa_ap_info wifiinfo[20];
+	FileParam_s rFileParam;
+	memset(&rFileParam, 0, sizeof(rFileParam));
 	
 	char buf[64] = {0};
 	int ret = -1;
@@ -1366,15 +1374,15 @@ int ForceConnect(char *pSsid)
 		printf("connect %s failed\n", pSsid);
 		if (memcmp(pSsid, "WIFINVR", 7) != 0)
 		{
-			Read_Config_File(CONNNECTED_NVR_CONF, 1,  buf);
-			printf("Cannot connect to bridge: %s, try to NVR host: %s\n", pSsid, buf);
+			Read_Config_File(CONNNECTED_NVR_CONF, &rFileParam);
+			printf("Cannot connect to bridge: %s, try to NVR host: %s\n", pSsid, rFileParam.ssid);
 
 			memset(wifiinfo, 0, sizeof(wifiinfo));
-			char *p = buf;
+			char *p = rFileParam.ssid;
 			ret = Search_Wifi(wifiinfo, &num, &p);
 			if ((ret < 0) || (num <= 0))
 			{
-				printf("Can't find: %s\n", buf);
+				printf("Can't find: %s\n", rFileParam.ssid);
 				continue;
 			}
 
@@ -1449,14 +1457,20 @@ int Switch2Bridge(void)
 {
 	//int connected = -1;
 	int i, num = 0;
-	
-	struct wpa_ap_info wifiinfo[20];
-	char buf[128] = {0};
-	char bridgePrefix[64];
-	char *WifiPrefix[2] = {buf, bridgePrefix};
 	int ret = 0;
 	
-	Read_Config_File(CONNNECTED_NVR_CONF, 1, buf);	
+	struct wpa_ap_info wifiinfo[20];
+	
+	char bridgePrefix[64];
+	FileParam_s rFileParam;
+	memset(&rFileParam, 0, sizeof(rFileParam));
+	
+	Read_Config_File(CONNNECTED_NVR_CONF, &rFileParam);
+	
+	char *WifiPrefix[2] = {rFileParam.ssid, bridgePrefix};
+	
+
+		
 
 	memset(bridgePrefix, 0x00, 64);
 	memcpy(bridgePrefix, g_IpcRuningData.WifiNvrInfo.ssid, 19);
@@ -1521,14 +1535,18 @@ int WirelessHeartbeat(void)
 	int connectStatus = 0;
 	int DisconnectionCount = 0;
 	int weakSignalCount = 0;
+	int firstHeart = 0;
 	fd_set fdRead;
 	struct timeval tv;
 	char recvBuf[1024];
 	int  recvSize,recvBufSize=1024;
-	char ssidBuf0[64], ssidBuf1[64];
+	
 	char keybuf[64];
 	char* localip_eth2 = NULL;
 	unsigned int tick = 0, times = 0;
+
+	FileParam_s rFileParam;
+	
 	
 	int cmdnum = 0;	
 
@@ -1542,7 +1560,7 @@ int WirelessHeartbeat(void)
 	XmGetEthAttr("wlan0", HW_ADDR, g_IpcRuningData.LanMac);
 	while(1)
 	{
-		usleep(1000*1500);
+		
 		//printf("\n\nthe count is %d.		weaksig is %d.\n", count, weakSignalCount);
 		
 		/* Send heartbeat */
@@ -1634,8 +1652,8 @@ int WirelessHeartbeat(void)
 			if (memcmp(g_IpcRuningData.WifiNvrInfo.ssid, "WIFINVR", 7) == 0)
 			{
 				if ((access(FORCE_CONNECT_FLAG, F_OK) == 0)
-					&& (Read_Config_File(FORCE_CONNECT_FLAG, 1, ssidBuf1) == 0)
-					&& (memcmp(g_IpcRuningData.WifiNvrInfo.ssid, ssidBuf1,strlen(ssidBuf0)+1) == 0))
+					&& (Read_Config_File(FORCE_CONNECT_FLAG, &rFileParam) == 0)
+					&& (memcmp(g_IpcRuningData.WifiNvrInfo.ssid, rFileParam.ssid,strlen(rFileParam.ssid)+1) == 0))
 				
 				{
 					snprintf((char*)heartBeat, 64, "IPC%02x%02x%02x%02x%02x%02x%03dF",
@@ -1657,8 +1675,8 @@ int WirelessHeartbeat(void)
 			else if (memcmp(g_IpcRuningData.WifiNvrInfo.ssid, "WIFIBRG", 7) == 0)
 			{
 				if ((access(FORCE_CONNECT_FLAG, F_OK) == 0)
-					&& (Read_Config_File(FORCE_CONNECT_FLAG, 1, ssidBuf1) == 0)
-					&& (memcmp(g_IpcRuningData.WifiNvrInfo.ssid, ssidBuf1, strlen(ssidBuf0)+1) == 0))
+					&& (Read_Config_File(FORCE_CONNECT_FLAG, &rFileParam) == 0)
+					&& (memcmp(g_IpcRuningData.WifiNvrInfo.ssid, rFileParam.ssid, strlen(rFileParam.ssid)+1) == 0))
 				{
 					snprintf((char*)heartBeat, 64, "BPC%02x%02x%02x%02x%02x%02x%03dm%sF",
 						g_IpcRuningData.LanMac[0], g_IpcRuningData.LanMac[1],
@@ -1836,6 +1854,11 @@ int WirelessHeartbeat(void)
 					break;
 				case IPC_ACK:
 					{
+						if(!firstHeart)
+						{
+							xm_get_tick("First Heart", g_heartime);
+							firstHeart = 1;
+						}
 						IPC_INFO("Heartbeat ACK\n");	
 					}					
 					break;
@@ -1843,12 +1866,7 @@ int WirelessHeartbeat(void)
 					{
 						RebootSystem();
 					}					
-					break;
-				case GOTOSLEEP:
-					{
-						//CmdGoToSleep(recvBuf);	
-					}									
-					break;
+					break;			
 				case FORCE:
 					{
 						char ssid[128] = {0};
@@ -1927,22 +1945,31 @@ int WirelessHeartbeat(void)
 						}
 					}
 					break;
+				case GOTOSLEEP:
+					{
+						XmSuspendByWlan("tcp cmd suspend");	
+					}									
+					break;
+				case GOTOWAKE:
+					{
+						//tcp唤醒用，睡眠状态唤醒主控已经处理了，上电过程中此命令无效，打印就行
+						IPC_INFO("GOTOWAKE\n");
+					}									
+					break;
 				case PIR_SET:
 					{
 						char *p = recvBuf + 8;
-						unsigned short pirtime = 0;
-						bool pirswitch = 0;
-						sscanf(p, "%hhd:%hhd", &pirswitch, &pirtime);
-						Host_Wake_PirSet(pirswitch, pirtime);
+						memset(g_IpcRuningData.pirInfo, 0, sizeof(g_IpcRuningData.pirInfo));
+						strcpy(g_IpcRuningData.pirInfo, p);
+						printf("rec:<%s>\n", g_IpcRuningData.pirInfo);						
+						Host_Wake_PirSet();
 					}
 					break;
-				case POWER_OFF_SET:
+				case RTC_SET:
 					{						
-						char *p = recvBuf + 14;
+						char *p = recvBuf + 8;
 						int rtctime = 0;
-
-						rtctime = atoi(p);
-						
+						rtctime = atoi(p);						
 						Host_Wake_RtcSet(rtctime);
 					}
 					break;
@@ -1955,6 +1982,7 @@ int WirelessHeartbeat(void)
 			}			
 		
 		}
+		usleep(1000*500);
 		
 	}
 	return -1;
@@ -1964,6 +1992,7 @@ void xmconnect_init(void)
 {
 	unsigned int uwTickCount_wlan_start = 0;
 	int uwRet = 0;
+	FileParam_s rFileParam;
 
 	//挂载SD卡，测试使用
 	mkdir("/mnt/sd0", 0777);
@@ -1997,7 +2026,9 @@ void xmconnect_init(void)
 	hisi_wlan_clear_wakeup_ssid();
 
 	memset(&g_QrBarcodeState, 0, sizeof(g_QrBarcodeState));
-			
+
+	//pir设置
+	Host_Wake_PirSet();
 
 
 	return;
@@ -2283,11 +2314,12 @@ static int TryConnect(struct wpa_ap_info pwifi_scan, int hidden, int force)
 		if ((force == WIRELESS_PAIRING) && (memcmp(pwifi_scan.ssid, "WIFINVR", 7) == 0))		//Bridge 不需要保存标志
 		{
 			
-			printf("Save the last.conf.\n");
-			Write_Config_File(CONNNECTED_NVR_CONF, pwifi_scan.ssid, pwifi_scan.auth);
-			sync();
-
-			
+			printf("\033[32mSave the last.conf.\033[0m\n");
+			FileParam_s wFileParam;
+			memset(&wFileParam, 0, sizeof(wFileParam));
+			strncpy(wFileParam.ssid, pwifi_scan.ssid, strlen(pwifi_scan.ssid));
+			wFileParam.authType = pwifi_scan.auth;
+			Write_Config_File(CONNNECTED_NVR_CONF, wFileParam);
 		}
 	}	
 

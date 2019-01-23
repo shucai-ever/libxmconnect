@@ -17,9 +17,8 @@
 #include "sys/prctl.h"
 
 
-
-#include "xmconnect.h"
 #include "xmextlib.h"
+#include "xmconnect.h"
 #include "xmnet.h"
 #include "xmcmd.h"
 
@@ -29,9 +28,10 @@
 
 
 #define PATH_WLAN_STATE 					"/jffs1/mnt/mtd/Config/wlanstate"	
-#define NVR_IP_ADDR 						"172.25.123.1"
+#define NVR_IP_ADDR 						"172.25.123.92"
 #define CONNNECTED_NVR_CONF 				"/jffs1/mnt/mtd/Config/last.conf"
 #define CONNNECTED_SLEEP_FLAG 				"/jffs1/mnt/mtd/Config/sleep.conf"
+#define LOGGER_CONF							"/jffs1/mnt/mtd/Config/logger.conf"
 #define IPC_INFO_ENABLE_FLAG 				"/jffs1/mnt/mtd/Config/heartbeat_info"
 #define KEEPALIVE_BUF1         				"sleep" //保活包内容
 #define BROADCAST_MONITOR_PORT 				4555 
@@ -49,6 +49,9 @@
 
 #define FRAME_WIDTH							704
 #define FRAME_HEIGHT						576
+#define             DHCP_IP_SET         0
+#define             DHCP_IP_DEL         1
+
 
 
 #define 	TCP_KEEPALIVE_FLAG					1
@@ -73,6 +76,7 @@ extern int g_sockfd[4]; 								//记录tcp连接的socket描述符
 extern unsigned char g_keepalive_switch;                //保活开关
 extern unsigned char g_index ; 							//已经创建的tcp链数（本项目只用一个tcp链）
 
+extern int g_heartime;									//socket交互成功用时
 
 
 
@@ -83,6 +87,8 @@ extern unsigned int g_ul_xm_wlan_resume_state;			//系统启动标志 								libdvr/n
 extern unsigned int g_force_sleep_flag;					//十分钟强制关闭标志								hi_ext_hal_mcu.c定义
 
 extern unsigned int g_wpa_supplicant_had_connect;		//无线模块作为客户端，是否连接上热点并且获得ip				libdvr/net.c定义
+
+extern int g_power_state;
 
 
 extern struct completion  g_dhcp_complet;				//完成量变量：等待ip获取成功		app_init.c 定义
@@ -99,13 +105,14 @@ StringToNum_s cmdstring[] = {
 							{ "GOTOBRG",	GOTOBRG },
 							{ "BRGSIG",     BRGSIG },
 							{ "IPC_ACK",      IPC_ACK },
-							{ "REBOOT",      REBOOT },
-							{ "GOTOSLEEP:",	GOTOSLEEP },
+							{ "REBOOT",      REBOOT },							
 							{ "FORCE:",     FORCE },
 							{ "AUTOSWITCH:",      AUTOSWITCH },
 							{ "IPconflict:",      IPconflict },
+							{ "GOTOSLEEP",	GOTOSLEEP },
+							{ "GOTOWAKE",	GOTOWAKE },
 							{ "PIR_SET:",      PIR_SET },
-							{ "POWER_OFF_SET::",      POWER_OFF_SET },
+							{ "RTC_SET:",      RTC_SET },
 							{ NULL,    Invalid },
 						};
 
@@ -172,6 +179,17 @@ int HI_HAL_MCUHOST_Systemtime_Get(void)
 	unsigned char uart2_buffer[64] = {0};
 	uart2_buffer[UF_LEN] = 0x4;
 	uart2_buffer[UF_CMD] = 0xd0;	
+	USART_Send_Data(mcu_fd,uart2_buffer);
+
+	return 0;
+}
+
+int HI_HAL_MCUHOST_McuInfo_Get(char state)
+{
+	unsigned char uart2_buffer[64] = {0};
+	uart2_buffer[UF_LEN] = 0x5;
+	uart2_buffer[UF_CMD] = 0xf0;
+	uart2_buffer[UF_DATA] = state;
 	USART_Send_Data(mcu_fd,uart2_buffer);
 
 	return 0;
@@ -392,6 +410,7 @@ void HostWake_Reason_Show(void)
 {
 	int wakup_reason= 0;
 	int count = 0;
+	int logFlag = LOGGER_FLAG;
 	char reason[30] = {0};
 
 	//从NVR Queue队列取唤醒原因
@@ -407,7 +426,9 @@ void HostWake_Reason_Show(void)
 	
 	xm_get_tick("wake up reason", &count);
 	ReasonToString(g_wakup_reason, reason);
-	HostWake_Reason_ShowExport(reason);	
+	HostWake_Reason_ShowExport(reason);
+	if(logFlag)
+		XmLogInfoWrite(POWER_UP, reason);
 
 }
 
@@ -425,16 +446,134 @@ int XmBatShow(unsigned char * pCap, int state)
 	return 0;
 }
 
+static void XmMcuInfoShow(char state, McuInfo_s * mcuInfo)
+{
+	char power[] = "POWER";
+	char pir[] = "PIR";
+	char force[] = "FORCE";
+	char rtc[] = "RTC";
+	char weekday[15] = {0};
+	
+	printf("\033[33m******************************MCU INFO************************************\033[0m\n");
+	if((state == 0x0) ||(state == 0xf))	//电源状态
+	{
+		printf("%-8s:USB CHARGED[%d] BATT FULL[%d]\n", power, mcuInfo->powerInfo&0x1, (mcuInfo->powerInfo&0x2)>> 1);
+	}
+	if((state == 0x1) ||(state == 0xf))	//pir信息
+	{
+		printf("%-8s:enCheck[%01d] enSwitch[%01d] checkTime[%d] SecTime0[%01d][%02d:%02d:%02d-%02d:%0d:%02d] SecTime1[%01d][%02d:%02d:%02d-%02d:%0d:%02d]\n",
+						pir, mcuInfo->pirInfo.enCheck, mcuInfo->pirInfo.enSwitch, mcuInfo->pirInfo.checkTime,
+						mcuInfo->pirInfo.enPirTime[0], mcuInfo->pirInfo.pirTime[0].hour, mcuInfo->pirInfo.pirTime[0].minute,mcuInfo->pirInfo.pirTime[0].second,
+												mcuInfo->pirInfo.pirTime[1].hour, mcuInfo->pirInfo.pirTime[1].minute,mcuInfo->pirInfo.pirTime[1].second,
+						mcuInfo->pirInfo.enPirTime[1], mcuInfo->pirInfo.pirTime[2].hour, mcuInfo->pirInfo.pirTime[2].minute,mcuInfo->pirInfo.pirTime[2].second,
+												mcuInfo->pirInfo.pirTime[3].hour, mcuInfo->pirInfo.pirTime[3].minute,mcuInfo->pirInfo.pirTime[3].second);						
+	}
+	if((state == 0x2) ||(state == 0xf))	//强制关机信息
+	{
+		printf("%-8s:enForce[%d] setTime[%d] waitTime[%d] curTime[%d]\n", force, mcuInfo->forceInfo.enForce, mcuInfo->forceInfo.setTime, mcuInfo->forceInfo.waitTime,
+																							mcuInfo->forceInfo.curTime);
+	}
+	if((state == 0x3) ||(state == 0xf))	//单片机rtc时间信息
+	{
+		NumToDate(mcuInfo->timeInfo.wday, weekday);
+		printf("%-8s:mcuTime[%d.%02d.%02d %02d:%02d:%02d %s]\n", rtc, mcuInfo->timeInfo.year, mcuInfo->timeInfo.month, mcuInfo->timeInfo.day,
+															mcuInfo->timeInfo.hour, mcuInfo->timeInfo.minute, mcuInfo->timeInfo.second, weekday);
+	}
 
-int XmMcuInfoGet(char state)
+	printf("\033[33m******************************MCU INFO END************************************\033[0m\n");
+
+	return;
+}
+
+int XmMcuInfoGet(char state, McuInfo_s * mcuInfo)
 {
 	
+	unsigned char buf[256] = {0};
+	char weekday[15] = {0};
+	int day = 0, year = 0;
+	
+	Queue * nvrQueue = NULL;	
+
+	memset(mcuInfo, 0, sizeof(mcuInfo));
+
+	if((state == 0xf) || (state == 0x0))
+		HI_HAL_MCUHOST_Power_Poll();
+	HI_HAL_MCUHOST_McuInfo_Get(state);
+	if(state == 0xf)
+		usleep(1000*100);
+	else
+		usleep(1000*50);
+
+	nvrQueue = GetNvrQueue();
 	
 
+	if((state == 0xf) || (state == 0x0))
+	{
+		xm_wifiqueue_addrshow(nvrQueue);
+		mcuInfo->powerInfo = g_power_state;
+	}
+		
+	
+	while(De_Queue(nvrQueue, buf) == 0)
+	{
+		if(buf[2] == 0xf0)
+		{			
+			if(buf[1] == 21)		//Pir Info
+			{
+				xm_wifiqueue_addrshow(nvrQueue);
+				mcuInfo->pirInfo.enCheck = buf[3];
+				mcuInfo->pirInfo.enSwitch = buf[4];
+				mcuInfo->pirInfo.checkTime = buf[5];
+				mcuInfo->pirInfo.enPirTime[0] = buf[6];
+				mcuInfo->pirInfo.pirTime[0].hour = buf[7];
+				mcuInfo->pirInfo.pirTime[0].minute = buf[8];
+				mcuInfo->pirInfo.pirTime[0].second = buf[9];
+				mcuInfo->pirInfo.pirTime[1].hour = buf[10];
+				mcuInfo->pirInfo.pirTime[1].minute = buf[11];
+				mcuInfo->pirInfo.pirTime[1].second = buf[12];
+				mcuInfo->pirInfo.enPirTime[1] = buf[13];
+				mcuInfo->pirInfo.pirTime[2].hour = buf[14];
+				mcuInfo->pirInfo.pirTime[2].minute = buf[15];
+				mcuInfo->pirInfo.pirTime[2].second = buf[16];
+				mcuInfo->pirInfo.pirTime[3].hour = buf[17];
+				mcuInfo->pirInfo.pirTime[3].minute = buf[18];
+				mcuInfo->pirInfo.pirTime[3].second = buf[19];
+			}
+			else if(buf[1] == 17)	//Force time Info
+			{
+				xm_wifiqueue_addrshow(nvrQueue);
+				mcuInfo->forceInfo.enForce = buf[3];
+				mcuInfo->forceInfo.setTime = (buf[4] << 24) |(buf[5] << 16) |(buf[6] << 8) | (buf[7] << 0);
+				mcuInfo->forceInfo.waitTime = (buf[8] << 24) |(buf[9] << 16) |(buf[10] << 8) | (buf[11] << 0);
+				mcuInfo->forceInfo.curTime =(buf[12] << 24) |(buf[13] << 16) |(buf[14] << 8) | (buf[15] << 0);
+			}
+			else if(buf[1] == 10)	//mcu time Info
+			{
+				xm_wifiqueue_addrshow(nvrQueue);				
+			
+				day = (buf[3] << 24) | (buf[4] << 16) | (buf[5] << 8) | (buf[6] << 0);
+				year = (buf[7] << 8) | (buf[8] << 0);			
+			
+				mcuInfo->timeInfo.year = year;
+				mcuInfo->timeInfo.wday = (day >> 26) & 0x3f;	
+				mcuInfo->timeInfo.month = (day >> 22) & 0xf;
+				mcuInfo->timeInfo.day = (day >> 17) & 0x1f;
+				mcuInfo->timeInfo.hour = (day >> 12 ) & 0x1f;
+				mcuInfo->timeInfo.minute = (day >> 6) & 0x3f;
+				mcuInfo->timeInfo.second = (day >> 0) & 0x3f;				
+
+			}
+		}		
+	}
+	
+	XmMcuInfoShow(state, mcuInfo);
 	
 
 	return 0;
 }
+
+
+
 
 static int XmTcpKeepaliveSet(bool state)
 {
@@ -442,10 +581,10 @@ static int XmTcpKeepaliveSet(bool state)
 	memset(&wlanparam, 0, sizeof(wlanparam));
 	wlanparam.sockfd = g_sockfd[0];
 	wlanparam.ul_sess_id = 1;
-	wlanparam.ul_interval_timer = 10000;	//10s
+	wlanparam.ul_interval_timer = 60000;	//10s
 	wlanparam.ul_retry_interval_timer = 3000;	//3s重传周期
 	wlanparam.us_retry_max_count = 8;		//最大重传次数
-	strncpy(wlanparam.keepalive_buf, "sleep_demo", 9);
+	strncpy(wlanparam.keepalive_buf, "sleep_demo", 10);
 	wlanparam.keepalive_buf_len = strlen(wlanparam.keepalive_buf);
 	WlanSetKeepAliveTcpParams(&wlanparam);
 	WlanKeepAliveSwitch(state, 1);
@@ -480,12 +619,7 @@ static void XmNetPatternSet(int tcpflag, int udpflag)
 	return;
 }
 
-static int XmLogInfoWrite(bool state, const char *reason)
-{
 
-
-	return 0;
-}
 
 
 int XmSuspendByWlan(const char *reason)
@@ -514,11 +648,6 @@ int XmSuspendByWlan(const char *reason)
 
 	return 0;
 }
-
-
-
-
-
 
 
 
@@ -668,6 +797,7 @@ static int XmSetStaticAddr(const char * ip)
 	ip_addr_t        st_gw;
 	ip_addr_t        st_ipaddr;
 	ip_addr_t        st_netmask;
+	unsigned int ipaddr = 0;
 
 	struct netif    *pst_lwip_netif = NULL;
 
@@ -686,19 +816,29 @@ static int XmSetStaticAddr(const char * ip)
 		
 	netif_set_addr(pst_lwip_netif,&st_ipaddr,&st_netmask,&st_gw);
 
+	hisi_wlan_ip_notify_intf(ipaddr, DHCP_IP_SET);
+	extern struct completion g_dhcp_complet;
+	complete_all(&g_dhcp_complet);
+	g_wpa_supplicant_had_connect = 1;
+
+	printf("\033[32mset static ip success..\033[0m\n");
 
 
-	return 0;
+	return 1;
 
 }
 
-int XmSetStaticIp(void)
+int XmSetStaticIp(int type)
 {
 	int ret = 0;
 	unsigned char mac[6] = {0};
 	unsigned char randomIp[18] = {0};
 	unsigned int random = 0, i = 0;
 	unsigned char *puc_macaddr = NULL;
+
+	if(type)
+		return -1;
+	
 	puc_macaddr = hisi_wlan_get_macaddr();
 	for(i=0;i<6;i++)
 	{
@@ -709,6 +849,8 @@ int XmSetStaticIp(void)
 	random = mac[5]%248+3;
 	snprintf(randomIp, 15,  "172.25.123.%d", random);
 
+	
+	printf("get random ip [%s]\n", randomIp);
 	
 
 	ret = XmSetStaticAddr(randomIp);
@@ -775,17 +917,26 @@ int FileSimpleWrite(const char * path,const char *buf,int count)
 
 
 
-int Read_Config_File(const char *path, int num, char *out)
+int Read_Config_File(const char *path, FileParam_s *rFileParam)
 {
 	char line[256] = {0};
 	char buf_type[16] = {0}; 
 	FILE *fp = NULL;
 	char *p = NULL;
 	int len = -1;
+	int type = 0;
+
+	memset(rFileParam, 0, sizeof(rFileParam));
 
 	if(path == NULL)
 	{
 		return -1;
+	}
+
+	p = strstr(path, "sleep");
+	if(p != NULL)
+	{
+		type = 1;
 	}
 			
 	if ((fp = fopen(path,"r+")) == NULL)
@@ -793,36 +944,39 @@ int Read_Config_File(const char *path, int num, char *out)
 		printf("open file %s fail!\n",path);
 		return -1;
 	}
-
-	p = strstr(path, "sleep");
-	if(p != NULL)
-	{
-		memcpy(buf_type, "wlan_flag=", 10);
-	}
-	else
-	{
-		memcpy(buf_type, "auth_type=", 10);
-	}
-
-	
-	
 	
 	while (fgets(line, sizeof(line), fp))
 	{
-		
-		if (((p = strstr(line, "ssid=")) !=NULL) && (num == 1))
+		p = strstr(line, "ssid=");		
+		if (p != NULL)
 		{			
 			p += strlen("ssid=");
 			p[strlen(p)-1] = 0;
-			strcpy(out, p);
-			break;
+			strcpy(rFileParam->ssid, p);			
 		}
-		if (((p = strstr(line, buf_type)) !=NULL) && (num == 2))
+
+		p = strstr(line, "authType=");
+		if (p != NULL)
 		{			
-			p += strlen(buf_type);
+			p += strlen("authType=");
 			p[strlen(p)-1] = 0;
-			strcpy(out, p);
-			break;
+			rFileParam->authType = atoi(p);
+		}
+
+		p = strstr(line, "wlanFlag=");
+		if(p != NULL)
+		{
+			p += strlen("wlanFlag=");
+			p[strlen(p)-1] = 0;
+			rFileParam->wlanFlag = atoi(p);
+		}
+
+		p = strstr(line, "pirInfo=");		
+		if (p != NULL)
+		{			
+			p += strlen("pirInfo");
+			p[strlen(p)-1] = 0;
+			strcpy(rFileParam->pirInfo, p);			
 		}
 		
 	}
@@ -831,7 +985,7 @@ int Read_Config_File(const char *path, int num, char *out)
 }
 
 
-int Write_Config_File(const char *path, const char *pssid, int auth_type)
+int Write_Config_File(const char *path, FileParam_s fileParam)
 {																		
 	FILE *fp = NULL;
 
@@ -848,16 +1002,8 @@ int Write_Config_File(const char *path, const char *pssid, int auth_type)
 	p = strstr(path, "sleep");
 	if(p != NULL)
 	{
-		memcpy(buf_type, "wlan_flag=", 10);
 		type = 1;
 	}
-	else
-	{
-		memcpy(buf_type, "auth_type=", 10);
-		type = 2;
-	}
-
-
 	
 	if ((fp = fopen(path,"w+")) == NULL)	 
 	{
@@ -867,25 +1013,78 @@ int Write_Config_File(const char *path, const char *pssid, int auth_type)
 	
 	memset(buf, 0, sizeof(buf));
 
-	if(type == 1)
+	if(type)
 	{
-		snprintf(buf, 256, "ssid=%s\nwlan_flag=%d\n", pssid, auth_type);
+		snprintf(buf, 256, "ssid=%s\nwlanFlag=%d\npirInfo=%s\n", fileParam.ssid, fileParam.wlanFlag, fileParam.pirInfo);
 	}
 	else
 	{
-		snprintf(buf, 256, "ssid=%s\nauth_type=%d\n", pssid, auth_type);
+		snprintf(buf, 256, "ssid=%s\nauthType=%d\n", fileParam.ssid, fileParam.authType);
 	}
 	
 				
 	fprintf(fp, "%s", buf);
 
-	printf("write info is :\n%s\n", buf);
+	//printf("write info is :\n%s\n", buf);
 	
 	fclose(fp);
-	sync();
+	
 	
 	return 0;
 }
+
+int XmLogInfoWrite(bool state, const char *reason)
+{
+	FILE *fp = NULL;
+	int times = 0;
+	char *p = NULL;
+	char line[256] = {0};
+	char timeStr[60] = {0};
+	char weekday[15] = {0};
+
+	McuInfo_s rmcuInfo;
+
+	if ((fp = fopen(LOGGER_CONF,"a+")) == NULL)	 
+	{
+		printf("fopen file error.%d:	%s\n", errno, strerror(errno));
+		
+	}
+
+	fseek(fp, -64L, SEEK_END);
+	while (fgets(line, sizeof(line), fp))
+	{
+		p = strstr(line, "Times:");
+		if(p != NULL)
+		{
+			p += strlen("Times:");
+			times = atoi(p);
+		}
+	}
+	fseek(fp, 0, SEEK_END);
+	times ++;
+	printf("times:[%d]\n", times);
+
+	//获取单片机rtc时间值
+	XmMcuInfoGet(0x3, &rmcuInfo);
+	NumToDate(rmcuInfo.timeInfo.wday, weekday);
+	
+	snprintf(timeStr, sizeof(timeStr), "[%04d-%02d-%02d %02d:%02d:%02d %-15s]", rmcuInfo.timeInfo.year, rmcuInfo.timeInfo.month, rmcuInfo.timeInfo.day,
+											rmcuInfo.timeInfo.hour, rmcuInfo.timeInfo.minute, rmcuInfo.timeInfo.second, weekday);
+	//printf("timeStr:%s\n", timeStr);
+	
+	memset(line, 0, sizeof(line));
+	if(state == POWER_UP)
+		snprintf(line, 256, "\n%s%-10s-------[Reason:%-30s]-------Times:%04d", timeStr, "Power Up", reason, times);
+	else if(state == POWER_DOWN)
+		snprintf(line, 256, "\n%s%-10s-------[Reason:%-30s]-------[Heart:%04d]Times:%04d", timeStr, "Power Down", reason, g_heartime, times);
+	
+	fprintf(fp, "%s", line);
+
+	fclose(fp);
+
+	return 0;
+}
+
 
 int Get_File_Value(const char * filename, const char *src, char *out)
 {
@@ -1491,12 +1690,12 @@ void set_wake_flag(void)
 	
 	g_wake_event &=HISI_WOW_EVENT_ALL_CLEAR;		  		///* Clear all events */
 	//g_wake_event |=HISI_WOW_EVENT_MAGIC_PACKET; 	  		///* Wakeup on Magic Packet */
-	//g_wake_event |=HISI_WOW_EVENT_NETPATTERN_TCP;			///* Wakeup on TCP NetPattern */
+	g_wake_event |=HISI_WOW_EVENT_NETPATTERN_TCP;			///* Wakeup on TCP NetPattern */
 	g_wake_event |=HISI_WOW_EVENT_NETPATTERN_UDP;	  		//* Wakeup on UDP NetPattern */
 	g_wake_event |=HISI_WOW_EVENT_DISASSOC; 		  		///* 去关联/去认证，Wakeup on Disassociation/Deauth */
 	//g_wake_event |=HISI_WOW_EVENT_AUTH_RX;			  		///* 对端关联请求，Wakeup on auth */
 	//g_wake_event |=HISI_WOW_EVENT_HOST_WAKEUP;		  	///* Host wakeup */
-	//g_wake_event |=HISI_WOW_EVENT_TCP_UDP_KEEP_ALIVE; 		///* Wakeup on TCP/UDP keep alive timeout */
+	g_wake_event |=HISI_WOW_EVENT_TCP_UDP_KEEP_ALIVE; 		///* Wakeup on TCP/UDP keep alive timeout */
 	g_wake_event |=HISI_WOW_EVENT_OAM_LOG_WAKEUP;	  		///* OAM LOG wakeup */
 	g_wake_event |=HISI_WOW_EVENT_SSID_WAKEUP;		  		///* SSID Scan wakeup */
 
@@ -1511,91 +1710,134 @@ void set_wake_flag(void)
 
 void Host_Sleep_Conf_Handle(bool state)
 {
-	char sleep_ssid[33] = {0};
-	char wlan_flag[2] = {0};
-	char wake_ssid[33] = {0};
+	FileParam_s rFileParam;
+	FileParam_s wFileParam;
+	memset(&wFileParam, 0, sizeof(wFileParam));
+	
+
+
+	printf("\033[32m*****************************SAVE SLEEP CONF START***********************\033[0m\n");
 	
 	if(access(CONNNECTED_SLEEP_FLAG, F_OK) != 0)
-	{
-		printf("Save the SLEEP_FLAG<%s>\n", g_IpcRuningData.WifiNvrInfo.ssid);
-		Write_Config_File(CONNNECTED_SLEEP_FLAG, g_IpcRuningData.WifiNvrInfo.ssid, g_wpa_supplicant_had_connect);
-
+	{	
+		printf("[%s] Not Exist\n");
+		
+		strncpy(wFileParam.ssid, g_IpcRuningData.WifiNvrInfo.ssid, strlen(g_IpcRuningData.WifiNvrInfo.ssid));
+		strncpy(wFileParam.pirInfo, g_IpcRuningData.pirInfo, strlen(g_IpcRuningData.pirInfo));
+		wFileParam.wlanFlag = g_wpa_supplicant_had_connect;
+		printf("First Save..............................................\nssid[%s] wlanFlag[%d] pirInfo<%s>\n", wFileParam.ssid, wFileParam.wlanFlag, wFileParam.pirInfo);
+		
+		Write_Config_File(CONNNECTED_SLEEP_FLAG, wFileParam);
 	}
 	else
 	{
-		Read_Config_File(CONNNECTED_SLEEP_FLAG, 1, sleep_ssid);
-		Read_Config_File(CONNNECTED_SLEEP_FLAG, 2, wlan_flag);
-
-		printf("\033[33mthe sleep_ssid is %s.  wlan_flag is %d\033[0m\n", sleep_ssid, atoi(wlan_flag));
+		printf("[%s]  Exist\n", CONNNECTED_SLEEP_FLAG);
+		Read_Config_File(CONNNECTED_SLEEP_FLAG, &rFileParam);
 		
-		if((memcmp(sleep_ssid, g_IpcRuningData.WifiNvrInfo.ssid, strlen(sleep_ssid)) != 0) ||(atoi(wlan_flag) != g_wpa_supplicant_had_connect))
+
+		strncpy(wFileParam.ssid, g_IpcRuningData.WifiNvrInfo.ssid, strlen(g_IpcRuningData.WifiNvrInfo.ssid));
+		strncpy(wFileParam.pirInfo, g_IpcRuningData.pirInfo, strlen(g_IpcRuningData.pirInfo));
+		wFileParam.wlanFlag = g_wpa_supplicant_had_connect;
+
+		printf("ssid[%-33s] wlaFlag[%d] pirInfo[%-60s] Last\n", rFileParam.ssid, rFileParam.wlanFlag, rFileParam.pirInfo);
+		printf("ssid[%-33s] wlaFlag[%d] pirInfo[%-60s] Now\n", wFileParam.ssid, wFileParam.wlanFlag, wFileParam.pirInfo);
+		
+		if((memcmp(rFileParam.ssid, wFileParam.ssid, strlen(rFileParam.ssid)) != 0) ||(rFileParam.wlanFlag != wFileParam.wlanFlag)
+											||(memcmp(rFileParam.pirInfo, wFileParam.pirInfo, strlen(rFileParam.pirInfo)) != 0))
 		{
-			printf("Save the SLEEP_FLAG<%s>\n", g_IpcRuningData.WifiNvrInfo.ssid);
-			Write_Config_File(CONNNECTED_SLEEP_FLAG, g_IpcRuningData.WifiNvrInfo.ssid, g_wpa_supplicant_had_connect);
+			printf("param not same, begin to Save.....................................\n");
+			Write_Config_File(CONNNECTED_SLEEP_FLAG, wFileParam);
 		}
+		else
+			printf("param same, not Save.........................\n");
 	}
 
 	if(state == 0)
 	{
-		Read_Config_File(CONNNECTED_NVR_CONF, 1, wake_ssid);
-		printf("\033[33mSet Sleep SSID To Wake:[%s]", wake_ssid );
-		hisi_wlan_set_wakeup_ssid(wake_ssid);
+		Read_Config_File(CONNNECTED_NVR_CONF, &rFileParam);
+		printf("\033[33mSet Sleep SSID To Wake:[%s]", rFileParam.ssid );
+		hisi_wlan_set_wakeup_ssid(rFileParam.ssid);
 	}
 
+	printf("\033[32m*****************************SAVE SLEEP CONF END***********************\033[0m\n");
 
 	return;
 }
 
-
-void Host_Wake_PirSet(bool pirswitch, unsigned char checktime)
+int Host_Wake_PirSet(void)
 {
-	unsigned short periodtime = 5;
-	printf("the pir switch is %d,	the period_time is %d,		the check_time is %d\n", pirswitch, periodtime, checktime);
+	PirSetInfo_s pirSet;
+	FileParam_s rFileParam;
+	PirDNDModeList_s dndlist;
+	SYSTEM_TIME systemTime[4];
 
+	memset(&dndlist, 0, sizeof(dndlist));
+	memset(&systemTime, 0, sizeof(systemTime));
+	memset(&pirSet, 0, sizeof(pirSet));
+	pirSet.delayTime = 5;
 	
-	HI_HAL_MCUHOST_Set_PIR_Time(pirswitch, &periodtime);
-	usleep(1000*50);
-	HI_HAL_MCUHOST_Set_PIR_CheckTime(&checktime);
+	if(access(CONNNECTED_SLEEP_FLAG, F_OK) != 0)
+	{
+		strcpy(g_IpcRuningData.pirInfo, "[00:00:00-00:00:00]&[00:00:00-00:00:00]&[00:00]");
+		sscanf("[00:00:00-00:00:00]&[00:00:00-00:00:00]&[00:00]", "[%hhd:%hhd:%hhd-%hhd:%hhd:%hhd]&[%hhd:%hhd:%hhd-%hhd:%hhd:%hhd]&[%hhd:%hhd]",
+						&systemTime[0].hour, &systemTime[0].minute, &systemTime[0].second, &systemTime[1].hour, &systemTime[1].minute, &systemTime[1].second,
+						&systemTime[2].hour, &systemTime[2].minute, &systemTime[2].second, &systemTime[3].hour, &systemTime[3].minute, &systemTime[3].second,
+						&pirSet.enSwitch, &pirSet.checkTime);
+	}
+	else
+	{
+		Read_Config_File(CONNNECTED_SLEEP_FLAG, &rFileParam);
+		strcpy(g_IpcRuningData.pirInfo, rFileParam.pirInfo);
+		sscanf(rFileParam.pirInfo, "[%hhd:%hhd:%hhd-%hhd:%hhd:%hhd]&[%hhd:%hhd:%hhd-%hhd:%hhd:%hhd]&[%hhd:%hhd]",
+						&systemTime[0].hour, &systemTime[0].minute, &systemTime[0].second, &systemTime[1].hour, &systemTime[1].minute, &systemTime[1].second,
+						&systemTime[2].hour, &systemTime[2].minute, &systemTime[2].second, &systemTime[3].hour, &systemTime[3].minute, &systemTime[3].second,
+						&pirSet.enSwitch, &pirSet.checkTime);
+	}
 
-	return;
+	if((systemTime[0].hour + systemTime[0].minute + systemTime[0].second + systemTime[1].hour + systemTime[1].minute + systemTime[1].second) != 0)
+		dndlist.pirMode[0].weekDayEn = 0xff;
+	if((systemTime[2].hour + systemTime[2].minute + systemTime[2].second + systemTime[3].hour + systemTime[3].minute + systemTime[3].second) != 0)
+		dndlist.pirMode[1].weekDayEn = 0xff;
+	dndlist.pirMode[0].pStartTime = &systemTime[0];
+	dndlist.pirMode[0].pEndTime = &systemTime[1];
+	dndlist.pirMode[1].pStartTime = &systemTime[2];
+	dndlist.pirMode[1].pEndTime = &systemTime[3];
+
+	HI_HAL_MCUHOST_Set_PIR_Time(pirSet.enSwitch, &pirSet.delayTime);
+	HI_HAL_MCUHOST_Set_PIR_CheckTime(&pirSet.checkTime);
+	HI_HAL_MCUHOST_Pir_DNDMode_Config(&dndlist);
+
+	return 0;
 }
+
+
 
 void Host_Wake_RtcSet(int times)
-{
-	
-	int uwRet = 0;
-	
-	
+{	
+
 	char dst[10] = {0};
-	time_t seconds;
-	struct tm *ltm = NULL;
+	
 
 	SYSTEM_TIME SetTime;
+	McuInfo_s mcuInfo;
 
-
-	
-	HI_HAL_MCUHOST_Rtc_Sync();
-	usleep(1000*100);
-
-	
-	seconds = time(NULL);
-	ltm = localtime(&seconds);
+	XmMcuInfoGet(0x3, &mcuInfo);
 
 	memset(&SetTime, 0, sizeof(SetTime));
-	SetTime.year = ltm->tm_year + 1900;
-	SetTime.month = ltm->tm_mon +1;
-	SetTime.day = ltm->tm_mday;
-	SetTime.hour = ltm->tm_hour;
-	SetTime.minute = ltm->tm_min + times;
-	SetTime.second = ltm->tm_sec;
-	SetTime.wday = ltm->tm_wday;
-	SetTime.isdst = ltm->tm_isdst;
+	SetTime.year = mcuInfo.timeInfo.year;
+	SetTime.month =mcuInfo.timeInfo.month;
+	SetTime.day = mcuInfo.timeInfo.day;
+	SetTime.hour = mcuInfo.timeInfo.hour;
+	SetTime.minute = mcuInfo.timeInfo.minute + (mcuInfo.timeInfo.second + times)/60;
+	SetTime.second = (mcuInfo.timeInfo.second + times)%60;
+	SetTime.wday = mcuInfo.timeInfo.wday;
+	SetTime.isdst = mcuInfo.timeInfo.isdst;
 
 	NumToDate(SetTime.wday, dst);
 
-	printf("now time is:	[%d-%d-%d	%d:%d:%d	%s]\n", ltm->tm_year + 1900,ltm->tm_mon +1, ltm->tm_mday, ltm->tm_hour,  ltm->tm_min,
-													ltm->tm_sec, dst);
-	printf("set time is:	[%d-%d-%d	%d:%d:%d	%s]\n", SetTime.year, SetTime.month, SetTime.day, SetTime.hour, SetTime.minute, 
+	printf("mcu now time is:	[%d-%d-%d	%d:%d:%d	%s]\n", mcuInfo.timeInfo.year, mcuInfo.timeInfo.month, mcuInfo.timeInfo.day, mcuInfo.timeInfo.hour,
+																			mcuInfo.timeInfo.minute, mcuInfo.timeInfo.second, dst);
+	printf("mcu set time is:	[%d-%d-%d	%d:%d:%d	%s]\n", SetTime.year, SetTime.month, SetTime.day, SetTime.hour, SetTime.minute, 
 													SetTime.second, dst);
 	
 	
@@ -2002,13 +2244,15 @@ int hicap_capture_start(void)
 
 void xm_wifiqueue_addrshow(Queue * wifiqueue)
 {
-	printf("start		addr:	%x\n", wifiqueue); 
-	printf("buf  		addr:	%x\n", wifiqueue->buf);
+	#if 0
+	//printf("start		addr:	%x\n", wifiqueue); 
+	//printf("buf  		addr:	%x\n", wifiqueue->buf);
 	printf("buf_start	addr:	%x\n", wifiqueue->buf_start_point);
 	printf("buf_end 	addr:	%x\n", wifiqueue->buf_end_point);
 	printf("hand		addr:	%x\n", wifiqueue->head);
 	printf("tail		addr:	%x\n", wifiqueue->tail);
 	printf("res is: %d\n", wifiqueue->res);
+	#endif
 }
 
 
@@ -2317,15 +2561,13 @@ int xm_sleep_demo_build(void)
 			else if(!memcmp(recvbuf, "PIR_SET:", 7))
 			{
 				char *p = recvbuf + 8;
-				unsigned short pirtime = 0;
-				bool whether = 0;
-				sscanf(p, "%hhd:%hhd", &whether, &pirtime);
-				Host_Wake_PirSet(whether, pirtime);
+				
+				Host_Wake_PirSet();
 
 
 			}
 
-			else if(!memcmp(recvbuf, "POWER_OFF_SET:", 14))
+			else if(!memcmp(recvbuf, "PIR_SET:", 14))
 			{
 				char *p = recvbuf + 14;
 				int rtctime = 0;

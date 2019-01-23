@@ -109,11 +109,12 @@ extern void HostWake_Reason_Show(void);
 
 /*********************************************
 **函数功能			：获取电池电量
-**param [in]	：state 	0:未充电 	1：充电中 		2：已充满电
+**param [in]	：无
 **param[out]	：pCap	电量百分比值
 **返回值			：0 获取成功		-1 获取失败
 **********************************************/
-extern int XmBatShow(unsigned char * pCap, int state);
+extern int XmBatGet(void);
+
 
 
 /*********************************************
@@ -277,7 +278,7 @@ extern void wpa_stop_xm(void);
 **param[out]	：无
 **返回值			：无
 **********************************************/
-extern void wap_start_xm(void);
+extern void wpa_start_xm(void);
 
 
 
@@ -288,6 +289,17 @@ extern void wap_start_xm(void);
 **返回值			：无
 **********************************************/
 extern void wpa_disconnect_xm(void);
+
+
+
+/*********************************************
+**函数功能			：wpa模式下连接热点
+**param [in]	：ssid热点名称	psk热点密码	autoType加密类型	
+**param[out]	：无
+**返回值			：无
+**********************************************/
+int XmConnectToWifi(const char *ssid, const char *autoType, const char *psk);
+
 
 
 /*********************************************

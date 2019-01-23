@@ -962,6 +962,9 @@ int WirelessPairing(int pairing_type)
 		strncpy(g_IpcRuningData.WifiNvrInfo.ssid, rFileParam.ssid, strlen(rFileParam.ssid));
 		
 		g_wpa_supplicant_had_connect = 1;
+
+		if(hisi_wlan_set_keepalive_switch(0, 1) == 0)
+			printf("off keepalive success...............\n");
 		
 		//ReadSpiInfo();
 		return 1;
@@ -1856,7 +1859,7 @@ int WirelessHeartbeat(void)
 					{
 						if(!firstHeart)
 						{
-							xm_get_tick("First Heart", g_heartime);
+							xm_get_tick("First Heart", &g_heartime);
 							firstHeart = 1;
 						}
 						IPC_INFO("Heartbeat ACK\n");	
@@ -2018,7 +2021,7 @@ void xmconnect_init(void)
 
 	if(g_ul_xm_wlan_resume_state == 0)
 	{
-		wap_start_xm();		
+		wpa_start_xm();		
 	}
 
 

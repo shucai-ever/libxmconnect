@@ -174,15 +174,7 @@ int Xm_KeepAlive_Set(void)
 
 }
 
-int HI_HAL_MCUHOST_Systemtime_Get(void)
-{
-	unsigned char uart2_buffer[64] = {0};
-	uart2_buffer[UF_LEN] = 0x4;
-	uart2_buffer[UF_CMD] = 0xd0;	
-	USART_Send_Data(mcu_fd,uart2_buffer);
 
-	return 0;
-}
 
 int HI_HAL_MCUHOST_McuInfo_Get(char state)
 {
@@ -432,19 +424,37 @@ void HostWake_Reason_Show(void)
 
 }
 
-int XmBatShow(unsigned char * pCap, int state)
+int XmBatGet(void)
 {
 	int ret = 0;
+	int chgstate = 0;
+	unsigned char chgvalue = 0;
+	
+	HI_HAL_MCUHOST_Power_Poll();
+	usleep(1000*20);
 
-	ret = GetSystemPowerCap(pCap, state);
+	chgstate = g_power_state;
+	if(chgstate >= 2)
+	{
+		chgstate = 2;
+	}
+	printf("the chg state is %x\n", chgstate );
+
+	
+	ret = GetSystemPowerCap(&chgvalue, chgstate);
 	if(ret != 0)
 	{
 		printf("get power cap error\n");
 		return -1;
 	}
+	
+	
 
-	return 0;
+	printf("the chg value is %d\n", chgvalue);
+
+	return chgvalue;
 }
+
 
 static void XmMcuInfoShow(char state, McuInfo_s * mcuInfo)
 {
@@ -581,7 +591,7 @@ static int XmTcpKeepaliveSet(bool state)
 	memset(&wlanparam, 0, sizeof(wlanparam));
 	wlanparam.sockfd = g_sockfd[0];
 	wlanparam.ul_sess_id = 1;
-	wlanparam.ul_interval_timer = 60000;	//10s
+	wlanparam.ul_interval_timer = 20000;	//10s
 	wlanparam.ul_retry_interval_timer = 3000;	//3s重传周期
 	wlanparam.us_retry_max_count = 8;		//最大重传次数
 	strncpy(wlanparam.keepalive_buf, "sleep_demo", 10);
@@ -648,6 +658,7 @@ int XmSuspendByWlan(const char *reason)
 
 	return 0;
 }
+
 
 
 
@@ -1627,7 +1638,7 @@ void wpa_stop_xm(void)
 	}
 }
 
-void wap_start_xm(void)
+void wpa_start_xm(void)
 {
 	int uwRet = 0;
 	
@@ -1679,6 +1690,107 @@ void wpa_disconnect_xm(void)
 }
 
 
+int XmConnectToWifi(const char *ssid, const char *autoType, const char *psk)
+{
+	
+	struct wpa_assoc_request wpa_assoc_req;
+	unsigned char auth_type[32],key[64];
+	unsigned char err;
+	int uwRet = 0;
+
+	//判断是否开启ap模式，如果开启，关闭
+	if(g_hostapd_had_run)
+	{
+		hapd_stop_xm();
+	}
+	
+	//开启wpa_supplicant
+	if(g_ul_xm_wlan_resume_state == 0)
+	{
+		if(g_wpa_supplicant_had_run)
+		{		
+			wpa_stop_xm();
+		}
+	 	wpa_start_xm();
+	}
+
+	
+	if(g_wpa_supplicant_had_connect)
+	{
+		wpa_disconnect_xm();
+	}
+	
+	//开始连接指定热点
+	memset(&wpa_assoc_req , 0 ,sizeof(struct wpa_assoc_request));
+
+	//get hidden_ssid
+	wpa_assoc_req.hidden_ssid=0;
+
+	//get ssid
+	strcpy(wpa_assoc_req.ssid,ssid);
+	printf("wpa_connect: ssid: %s\n",wpa_assoc_req.ssid);
+
+	//get auth_type
+	strcpy(auth_type,autoType);
+	if (!strcmp(auth_type, "open"))
+	{
+		wpa_assoc_req.auth = WPA_SECURITY_OPEN;
+	}
+	else if (!strcmp(auth_type, "wep"))
+	{
+		wpa_assoc_req.auth = WPA_SECURITY_WEP;
+	}
+	else if (!strcmp(auth_type, "wpa"))
+	{
+		wpa_assoc_req.auth = WPA_SECURITY_WPAPSK;
+	}
+	else if (!strcmp(auth_type, "wpa2"))
+	{
+		wpa_assoc_req.auth = WPA_SECURITY_WPA2PSK;
+	}
+	else if (!strcmp(auth_type, "wpa+wpa2"))
+	{
+		wpa_assoc_req.auth = WPA_SECURITY_WPAPSK_WPA2PSK_MIX;
+	}
+	else
+	{
+		//cmd_connect_wpa_help();
+		return;
+	}
+
+	printf("wpa_connect: Authentication Type = %d\n",wpa_assoc_req.auth);
+
+	//get key	
+	if (strlen(psk) >= sizeof(wpa_assoc_req.key))
+	{
+		//cmd_connect_wpa_help();
+		return;
+	}
+	strcpy(wpa_assoc_req.key, psk);
+
+	printf("wpa_connect: Key = %s\n",wpa_assoc_req.key);
+
+	
+	uwRet = wpa_cli_connect(&wpa_assoc_req);
+	if(uwRet == 0)
+	{
+		printf("wpa_cli_connect success.\n");
+		
+		uwRet = wait_for_completion_timeout(&g_dhcp_complet, LOS_MS2Tick(40000));//40s超时
+		if (0 == uwRet)
+		{
+			printf("can not  get ip\n");
+			return ;
+		}
+		else
+		{
+			printf("success get ip\n");
+			memcpy(g_IpcRuningData.WifiNvrInfo.ssid, wpa_assoc_req.ssid, sizeof(wpa_assoc_req.ssid));
+			
+		}
+	}
+
+}
 
 
 
@@ -1841,7 +1953,7 @@ void Host_Wake_RtcSet(int times)
 													SetTime.second, dst);
 	
 	
-	HI_HAL_MCUHOST_Set_Wakeup_Time(1, 4, &SetTime, 1);
+	HI_HAL_MCUHOST_Set_Wakeup_Time(1, 3, &SetTime, 1);
 
 	
 

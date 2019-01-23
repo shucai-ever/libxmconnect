@@ -114,7 +114,7 @@ typedef enum HostWakeReason
 	REASON_TYPE_MCU_KEY        			= 11,       /* MCU key wakeup */
 	REASON_TYPE_MCU_PIR        			= 12,       /* MCU pir wakeup */
 	REASON_TYPE_MCU_RESET      			= 13,       /* MCU reset wakeup */
-	REASON_TYPE_MCU_RTC        			= 19,       /* MCU rtc wakeup */
+	REASON_TYPE_MCU_RTC        			= 18,       /* MCU rtc wakeup */
 	REASON_TYPE_BUT
 }HostWakeReason_e;
 

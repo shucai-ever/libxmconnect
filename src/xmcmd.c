@@ -392,106 +392,19 @@ static int cmd_sock_test_xm(int argc, char *argv[])
 
 }
 
-static int cmd_arp_test_xm(void)
+static int cmd_ipconfig_test(int argc, char *argv[])
 {
-	Wireless_Ipconfig(0);
-
-	return 0;
-}
-
-static int cmd_nvr_connect_xm(void)
-{
-	int uwRet = 0;
-	int sockfd = -1;
-
-	
-	//判断是否开启ap模式，如果开启，关闭
-	if(g_hostapd_had_run)
-	{
-		hapd_stop_xm();
-	}
-
-	if(g_ul_xm_wlan_resume_state == 0)
-	{
-		if(g_wpa_supplicant_had_run)
-		{		
-			wpa_stop_xm();
-		}
-	 
-	    uwRet = wpa_supplicant_start("wlan0", "hisi", NULL);
-
-	    if (uwRet != 0)
-	    {
-	        printf("cmd_wpa_start fail.\n");
-	        return -1;
-	    }
-		else
-		{
-			printf("cmd_wpa_start success\n");
-			Mux_Operate(&g_wpa_supplicant_had_run, 1);
-		}
+	if(argc != 1)
+		printf("invalid parameber\nxm_ipconfig [ip]\n");
 		
-		hisi_wlan_enable_channel_14();
-
-		
-	}
-
-	if(g_wpa_supplicant_had_connect)
-	{
-		wpa_disconnect_xm();
-	}
-	
-	struct wpa_assoc_request wpa_assoc_req ;
-
-	
-	memset(&wpa_assoc_req, 0, (sizeof(struct wpa_ap_info)));	
-
-	memcpy(wpa_assoc_req.ssid, "WIFINVR00ac78540001", 33);
-	memcpy(wpa_assoc_req.key, "XMNVR123456", strlen("XMNVR123456"));
-	
-	wpa_assoc_req.auth = 4;
-	wpa_assoc_req.hidden_ssid = 0;
-
-	uwRet = wpa_cli_connect(&wpa_assoc_req);
-	if(uwRet == 0)
-	{
-		printf("wpa_cli_connect success.wait udhc get ip\n");
-		
-		init_completion(&g_dhcp_complet);
-
-		uwRet = wait_for_completion_timeout(&g_dhcp_complet, LOS_MS2Tick(40000));//40s超时
-		if (0 == uwRet)
-		{
-			printf("can not  get ip\n");
-			return -1;
-		}
-		else
-		{
-			printf("success get ip\n");
-			memcpy(g_IpcRuningData.WifiNvrInfo.ssid, wpa_assoc_req.ssid, sizeof(wpa_assoc_req.ssid));
-			
-		}
-		
-		
-	}
-
-#if 0	
-	sockfd = ConnectNvrSocket(NVR_IP_ADDR);
-	if (sockfd < 0)
-	{
-		printf("ConnectNvrSocket failed\n");
-		
-	}
+	if(IsIpConflict("wlan0",argv[0]) == 1)
+		printf("ipconfig..\n");
 	else
-	{
-		printf("ConnectNvrSocket succeed\n");
-		
-    }
-#endif
-
+		printf("not ipconfig...\n");
 
 	return 0;
 }
+
 
 
 static void cmd_get_station_xm(void)
@@ -522,26 +435,9 @@ static void cmd_get_station_xm(void)
 	return;
 }
 
-
-
-
-
-
-
 static void cmd_wpa_connect_xm(int argc, char *argv[])
 {
-	struct wpa_assoc_request wpa_assoc_req;
-	unsigned char auth_type[32],key[64];
-	unsigned char err;
-	int uwRet = 0;
-
-	//判断是否开启ap模式，如果开启，关闭
-	if(g_hostapd_had_run)
-	{
-		hapd_stop_xm();
-	}
 	
-
 	//帮助信息
 	if ((argc < 2) ||(memcmp(argv[0], "help", 4) == 0))
 	{
@@ -549,127 +445,15 @@ static void cmd_wpa_connect_xm(int argc, char *argv[])
 		cmd_connect_wpa_help();
 		return;
 	}
-
-	//开启wpa_supplicant
-	if(g_ul_xm_wlan_resume_state == 0)
-	{
-		if(g_wpa_supplicant_had_run)
-		{		
-			wpa_stop_xm();
-		}
-	 
-	    uwRet = wpa_supplicant_start("wlan0", "hisi", NULL);
-
-	    if (uwRet != 0)
-	    {
-	        printf("cmd_wpa_start fail.\n");
-	        return;
-	    }
-		else
-		{
-			printf("cmd_wpa_start success\n");
-			Mux_Operate(&g_wpa_supplicant_had_run, 1);
-		}
-		
-		hisi_wlan_enable_channel_14();
-	}
-
 	
-	if(g_wpa_supplicant_had_connect)
-	{
-		wpa_disconnect_xm();
-	}
-	
-	//开始连接指定热点
-	memset(&wpa_assoc_req , 0 ,sizeof(struct wpa_assoc_request));
-
-	//get hidden_ssid
-	wpa_assoc_req.hidden_ssid=0;
-
-	//get ssid
-	if (strlen(argv[0]) >= sizeof(wpa_assoc_req.ssid))
-	{
-		cmd_connect_wpa_help();
-		return;
-	}
-	strcpy(wpa_assoc_req.ssid,argv[0]);
-	printf("wpa_connect: ssid: %s\n",wpa_assoc_req.ssid);
-
-	//get auth_type
-	if (strlen(argv[1]) >= sizeof(auth_type))
-	{
-		cmd_connect_wpa_help();
-		return;
-	}
-	strcpy(auth_type,argv[1]);
-	if (!strcmp(auth_type, "open"))
-	{
-		wpa_assoc_req.auth = WPA_SECURITY_OPEN;
-	}
-	else if (!strcmp(auth_type, "wep"))
-	{
-		wpa_assoc_req.auth = WPA_SECURITY_WEP;
-	}
-	else if (!strcmp(auth_type, "wpa"))
-	{
-		wpa_assoc_req.auth = WPA_SECURITY_WPAPSK;
-	}
-	else if (!strcmp(auth_type, "wpa2"))
-	{
-		wpa_assoc_req.auth = WPA_SECURITY_WPA2PSK;
-	}
-	else if (!strcmp(auth_type, "wpa+wpa2"))
-	{
-		wpa_assoc_req.auth = WPA_SECURITY_WPAPSK_WPA2PSK_MIX;
-	}
-	else
-	{
-		cmd_connect_wpa_help();
-		return;
-	}
-
-	printf("wpa_connect: Authentication Type = %d\n",wpa_assoc_req.auth);
-
-	//get key
-	if (argc >= 3)
-	{
-		if (strlen(argv[2]) >= sizeof(wpa_assoc_req.key))
-		{
-			cmd_connect_wpa_help();
-			return;
-		}
-		strcpy(wpa_assoc_req.key, argv[2]);
-
-		printf("wpa_connect: Key = %s\n",wpa_assoc_req.key);
-
-	}
-
-	uwRet = wpa_cli_connect(&wpa_assoc_req);
-	if(uwRet == 0)
-	{
-		printf("wpa_cli_connect success.\n");
-		
-		uwRet = wait_for_completion_timeout(&g_dhcp_complet, LOS_MS2Tick(40000));//40s超时
-		if (0 == uwRet)
-		{
-			printf("can not  get ip\n");
-			return ;
-		}
-		else
-		{
-			printf("success get ip\n");
-			memcpy(g_IpcRuningData.WifiNvrInfo.ssid, wpa_assoc_req.ssid, sizeof(wpa_assoc_req.ssid));
-			
-		}
-	}
-
-
+	XmConnectToWifi(argv[0], argv[1], argv[2]);
+	return;
 }
 
 
 
 
-void cmd_hapd_connect_xm(int argc, unsigned char *argv[])
+void cmd_hapd_start_xm(int argc, unsigned char *argv[])
 {
     ip_addr_t           st_gw;
     ip_addr_t           st_ipaddr;
@@ -835,22 +619,9 @@ static void cmd_led_test(int argc, char *argv[])
 }
 
 
-void cmd_pir_test(int argc, char *argv[])
-{
-	
-	if(argc != 2)
-	{
-		printf("Invalid parameter\n"
-			  	"Example:\n"
-			  	"pir_test [period time] [check time]\n");
-		return;
-	}
-
-	bool whether = 0;
-	unsigned char check_time = 0;
-	whether = atoi(argv[0]);
-	check_time = atoi(argv[1]);
-	Host_Wake_PirSet(whether, check_time);
+void cmd_pir_set(void)
+{	
+	Host_Wake_PirSet();
 
 	return;
 }
@@ -861,7 +632,7 @@ void cmd_sleep(void)
 	char sleep_ssid[32] = {0};
 	char wlan_flag[2] = {0};
 	
-	wap_start_xm();
+	wpa_start_xm();
 
 	XmSuspendByWlan("cmd_sleep suspend");
 	
@@ -1083,29 +854,7 @@ int cmd_sed(int argc, char *argv[])
 
 int cmd_bat_show(void)
 {
-	int ret = 0;
-	int chgstate = 0;
-	unsigned char chgvalue = 0;
-	
-	HI_HAL_MCUHOST_Power_Poll();
-
-	//chgstate = g_chg_state;
-	if(chgstate >= 2)
-	{
-		chgstate = 2;
-	}
-	printf("the chg state is %x\n", chgstate );
-
-	
-
-	ret = XmBatShow(&chgvalue, chgstate);
-	if(ret != 0)
-	{
-		printf("get chg value error\n");
-		return -1;
-	}
-
-	printf("the chg value is %d\n", chgvalue);
+	XmBatGet();
 	
 	return 0;
 }
@@ -1195,7 +944,7 @@ void cmd_search_wifi(void)
 
 	memset(pwifi_result, 0, (sizeof(struct wpa_ap_info) * 60));
 
-	wap_start_xm();
+	wpa_start_xm();
 
 	
 	
@@ -1231,6 +980,10 @@ void cmd_search_wifi(void)
 void cmd_rtc_wake_up(int argc, char *argv[])
 {
 	int uwRet = 0;
+
+	if(argc != 1)
+		printf("invalid parameber\nxm_rtc_set [times/s]\n");
+	
 	int times = atoi(argv[0]);
 	
 	
@@ -1255,24 +1008,10 @@ void cmd_rtc_wake_up(int argc, char *argv[])
 
 
 
-void cmd_mcu_time(void)
-{
-	
-	unsigned char buf[6] = {0};
-	int i = 0;
-	
-	HI_HAL_MCUHOST_Systemtime_Get();
-	usleep(1000*1000);
-
-
-	
-	
-	return;
-}
 
 void cmd_wpa_start(void)
 {
-	wap_start_xm();
+	wpa_start_xm();
 
 
 	return;
@@ -1426,27 +1165,25 @@ static void cmd_file(int argc, char *argv[])
 
 void WifiCmdReg(void)
 {
-	osCmdReg(CMD_TYPE_EX, "set_addr",           0, 	(CMD_CBK_FUNC)cmd_set_attr_xm);
-	osCmdReg(CMD_TYPE_EX, "get_addr",         	0,	(CMD_CBK_FUNC)cmd_get_attr_xm);
-	osCmdReg(CMD_TYPE_EX, "nvr_connect",     	0, 	(CMD_CBK_FUNC)cmd_nvr_connect_xm);
-	osCmdReg(CMD_TYPE_EX, "socket_test",       	0, 	(CMD_CBK_FUNC)cmd_sock_test_xm);
-	osCmdReg(CMD_TYPE_EX, "arp_test",           0, 	(CMD_CBK_FUNC)cmd_arp_test_xm);	
-	osCmdReg(CMD_TYPE_EX, "get_station",       	0, 	(CMD_CBK_FUNC)cmd_get_station_xm);
-	osCmdReg(CMD_TYPE_EX, "connect_ap",       	0, 	(CMD_CBK_FUNC)cmd_hapd_connect_xm);	
-	osCmdReg(CMD_TYPE_EX, "connect_wpa",  		0, 	(CMD_CBK_FUNC)cmd_wpa_connect_xm);
-	osCmdReg(CMD_TYPE_EX, "rssi_zero",  		0, 	(CMD_CBK_FUNC)wpa_disconnect_xm);	
-	osCmdReg(CMD_TYPE_EX, "led_test",  			0, 	(CMD_CBK_FUNC)cmd_led_test);
-	osCmdReg(CMD_TYPE_EX, "pir_test",  			0, 	(CMD_CBK_FUNC)cmd_pir_test);
+	osCmdReg(CMD_TYPE_EX, "xm_set_addr",           0, 	(CMD_CBK_FUNC)cmd_set_attr_xm);
+	osCmdReg(CMD_TYPE_EX, "xm_get_addr",         	0,	(CMD_CBK_FUNC)cmd_get_attr_xm);
+	//osCmdReg(CMD_TYPE_EX, "xm_socket_test",       	0, 	(CMD_CBK_FUNC)cmd_sock_test_xm);
+	osCmdReg(CMD_TYPE_EX, "xm_ipconfig",           0, 	(CMD_CBK_FUNC)cmd_ipconfig_test);	
+	osCmdReg(CMD_TYPE_EX, "xm_get_station",       	0, 	(CMD_CBK_FUNC)cmd_get_station_xm);
+	//osCmdReg(CMD_TYPE_EX, "xm_ap_start",       	0, 	(CMD_CBK_FUNC)cmd_hapd_start_xm);	
+	osCmdReg(CMD_TYPE_EX, "xm_wpa_connect",  		0, 	(CMD_CBK_FUNC)cmd_wpa_connect_xm);
+	//osCmdReg(CMD_TYPE_EX, "xm_rssi_zero",  		0, 	(CMD_CBK_FUNC)wpa_disconnect_xm);	
+	osCmdReg(CMD_TYPE_EX, "xm_led_test",  			0, 	(CMD_CBK_FUNC)cmd_led_test);	
 	osCmdReg(CMD_TYPE_EX, "xm_sleep",  			0, 	(CMD_CBK_FUNC)cmd_sleep);
-	osCmdReg(CMD_TYPE_EX, "arp_send",  			0, 	(CMD_CBK_FUNC)cmd_arp);
-	osCmdReg(CMD_TYPE_EX, "sed",  				0, 	(CMD_CBK_FUNC)cmd_sed);
-	osCmdReg(CMD_TYPE_EX, "bat_show",  			0, 	(CMD_CBK_FUNC)cmd_bat_show);
-	osCmdReg(CMD_TYPE_EX, "wake_event",  		0, 	(CMD_CBK_FUNC)cmd_set_wake_flag);
-	osCmdReg(CMD_TYPE_EX, "wifiscan",  			0, 	(CMD_CBK_FUNC)cmd_search_wifi);	
-	osCmdReg(CMD_TYPE_EX, "rtc_set",  			0, 	(CMD_CBK_FUNC)cmd_rtc_wake_up);	
-	osCmdReg(CMD_TYPE_EX, "mcu_time",  			0, 	(CMD_CBK_FUNC)cmd_mcu_time);
-	osCmdReg(CMD_TYPE_EX, "wpa_start",  		0, 	(CMD_CBK_FUNC)cmd_wpa_start);
-	osCmdReg(CMD_TYPE_EX, "country_set",  		0, 	(CMD_CBK_FUNC)cmd_country_set);
+	osCmdReg(CMD_TYPE_EX, "xm_arp_send",  			0, 	(CMD_CBK_FUNC)cmd_arp);
+	osCmdReg(CMD_TYPE_EX, "xm_sed",  				0, 	(CMD_CBK_FUNC)cmd_sed);
+	osCmdReg(CMD_TYPE_EX, "xm_bat_show",  			0, 	(CMD_CBK_FUNC)cmd_bat_show);
+	//osCmdReg(CMD_TYPE_EX, "xm_wake_event",  		0, 	(CMD_CBK_FUNC)cmd_set_wake_flag);
+	//osCmdReg(CMD_TYPE_EX, "xm_wifiscan",  			0, 	(CMD_CBK_FUNC)cmd_search_wifi);	
+	osCmdReg(CMD_TYPE_EX, "xm_rtc_set",  			0, 	(CMD_CBK_FUNC)cmd_rtc_wake_up);
+	osCmdReg(CMD_TYPE_EX, "xm_pir_set",  			0, 	(CMD_CBK_FUNC)cmd_pir_set);
+	//osCmdReg(CMD_TYPE_EX, "wpa_start",  		0, 	(CMD_CBK_FUNC)cmd_wpa_start);
+	//osCmdReg(CMD_TYPE_EX, "country_set",  		0, 	(CMD_CBK_FUNC)cmd_country_set);
 	//osCmdReg(CMD_TYPE_EX, "qr_test",  			0, 	(CMD_CBK_FUNC)cmd_qr_test);
 	//osCmdReg(CMD_TYPE_EX, "qr_test1",  			0, 	(CMD_CBK_FUNC)cmd_qr_test1);
 	osCmdReg(CMD_TYPE_EX, "xm_mcu_info",  		0, 	(CMD_CBK_FUNC)cmd_mcu_info);
